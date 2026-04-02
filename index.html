@@ -1446,8 +1446,9 @@ function bindPageEvents(page, params) {
     inactiveTimer = setTimeout(() => { fading = true; }, 2000);
   });
 
-  // Splash on click
+  // Splash on click — login page only
   window.addEventListener('click', e => {
+    if (currentPage !== 'login') return;
     const colors = ['#f472b6','#818cf8','#34d399','#fbbf24','#60a5fa','#f87171'];
     for (let i = 0; i < 5; i++) {
       const ring    = document.createElement('div');
@@ -1467,6 +1468,15 @@ function bindPageEvents(page, params) {
   });
 
   function draw() {
+    // Only active on login page
+    if (currentPage !== 'login') {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.style.opacity = 0;
+      trails = [];
+      requestAnimationFrame(draw);
+      return;
+    }
+    canvas.style.display = 'block';
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (fading) {
       globalAlpha = Math.max(0, globalAlpha - 0.018);
@@ -1474,7 +1484,7 @@ function bindPageEvents(page, params) {
     }
     const now = Date.now();
     trails = trails.filter(t => now - t.born < 900);
-    trails.forEach((t, i) => {
+    trails.forEach((t) => {
       const age  = (now - t.born) / 900;
       const r    = t.r * (1 - age * 0.5);
       const a    = t.alpha * (1 - age);
