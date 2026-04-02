@@ -7,8 +7,46 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<style>
+  /* Dark mode */
+  html.dark body { background:#0f172a; color:#e2e8f0; }
+  html.dark .dm-bg   { background:#1e293b !important; }
+  html.dark .dm-bg2  { background:#0f172a !important; }
+  html.dark .dm-card { background:#1e293b !important; border-color:#334155 !important; }
+  html.dark .dm-text { color:#e2e8f0 !important; }
+  html.dark .dm-sub  { color:#94a3b8 !important; }
+  html.dark .dm-inp  { background:#0f172a !important; border-color:#475569 !important; color:#e2e8f0 !important; }
+  html.dark .dm-inp::placeholder { color:#64748b; }
+  html.dark .dm-divide > * { border-color:#334155 !important; }
+  html.dark .dm-hover:hover { background:#334155 !important; }
+  html.dark .dm-sidebar { background:#0f172a !important; }
+  html.dark .dm-sidebar-border { border-color:#1e293b !important; }
+  html.dark .dm-main { background:#0f172a !important; }
+  html.dark .dm-thead { background:#1e293b !important; }
+  html.dark .dm-tr:hover { background:#1e293b !important; }
+  html.dark .dm-border { border-color:#334155 !important; }
+  html.dark .dm-amber { background:#451a03 !important; }
+
+  /* Mouse gradient canvas */
+  #mouse-canvas {
+    position:fixed; inset:0; pointer-events:none; z-index:999;
+    transition:opacity 0.6s ease;
+  }
+
+  /* Splash rings */
+  .splash-ring {
+    position:fixed; border-radius:50%; pointer-events:none; z-index:1000;
+    border:2px solid transparent;
+    animation:splashAnim 0.7s ease-out forwards;
+  }
+  @keyframes splashAnim {
+    0%   { transform:translate(-50%,-50%) scale(0); opacity:0.9; }
+    100% { transform:translate(-50%,-50%) scale(1); opacity:0; }
+  }
+</style>
 </head>
-<body class="bg-gray-50 font-sans">
+<body class="bg-gray-50 font-sans dm-main">
+<canvas id="mouse-canvas"></canvas>
 <div id="root"></div>
 <script>
 
@@ -321,6 +359,7 @@ function renderShell(content) {
             <div class="text-white text-xs font-medium truncate">${currentUser.name}</div>
             <div class="text-slate-400 text-xs capitalize">${currentUser.role}</div>
           </div>
+          <button id="btn-dm" title="Toggle dark mode" class="text-slate-400 hover:text-yellow-300 text-sm mr-1">🌙</button>
           <button id="btn-logout" title="Sign Out" class="text-slate-400 hover:text-white text-base">⏏</button>
         </div>
       </div>
@@ -333,38 +372,145 @@ function renderShell(content) {
 // LOGIN PAGE
 // ================================================================
 function renderLogin() {
+  const dark = document.documentElement.classList.contains('dark');
   return `
-  <div class="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
+  <div id="login-bg" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden
+    ${dark ? 'bg-slate-900' : 'bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900'}">
     <div class="absolute inset-0 opacity-10" style="background-image:radial-gradient(circle,#6366f1 1px,transparent 1px);background-size:32px 32px"></div>
-    <div class="relative bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-      <div class="text-center mb-8">
-        <div class="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg text-2xl">🎫</div>
-        <h1 class="text-2xl font-bold text-slate-900">IT Ticketing System</h1>
-        <p class="text-slate-500 text-sm mt-1">Sign in with your company email</p>
+
+    <!-- Dark mode toggle -->
+    <button id="dm-toggle" title="Toggle dark mode"
+      class="fixed top-4 right-4 z-50 w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-lg border transition-all
+        ${dark ? 'bg-slate-700 border-slate-600 text-yellow-300 hover:bg-slate-600' : 'bg-white/20 border-white/30 text-white hover:bg-white/30'}">
+      ${dark ? '☀️' : '🌙'}
+    </button>
+
+    <div class="relative w-full max-w-md">
+      <!-- Card -->
+      <div class="rounded-2xl shadow-2xl p-7 ${dark ? 'bg-slate-800 border border-slate-700' : 'bg-white'}">
+        <div class="text-center mb-6">
+          <div class="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg text-2xl">🎫</div>
+          <h1 class="text-2xl font-bold ${dark ? 'text-white' : 'text-slate-900'}">IT Ticketing System</h1>
+          <p class="text-sm mt-1 ${dark ? 'text-slate-400' : 'text-slate-500'}">Sign in with your company email</p>
+        </div>
+
+        <!-- Tab switcher -->
+        <div class="flex rounded-xl p-1 mb-5 ${dark ? 'bg-slate-700' : 'bg-slate-100'}">
+          <button id="tab-signin" onclick="switchTab('signin')"
+            class="flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all tab-signin-active
+              ${dark ? 'bg-slate-600 text-white shadow' : 'bg-white text-slate-900 shadow'}">
+            Sign In
+          </button>
+          <button id="tab-register" onclick="switchTab('register')"
+            class="flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all
+              ${dark ? 'text-slate-400' : 'text-slate-500'}">
+            Create Account
+          </button>
+        </div>
+
+        <!-- Sign In Form -->
+        <div id="panel-signin">
+          <form id="login-form" class="space-y-4">
+            <div>
+              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Email Address</label>
+              <input id="login-email" type="email" required autofocus placeholder="you@company.com"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Password</label>
+              <input id="login-password" type="password" required placeholder="••••••••"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+            </div>
+            <div id="login-error" class="hidden text-red-500 text-xs bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-center"></div>
+            <button type="submit"
+              class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
+              Sign In
+            </button>
+          </form>
+        </div>
+
+        <!-- Register Form -->
+        <div id="panel-register" class="hidden">
+          <form id="register-form" class="space-y-3">
+            <div>
+              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Full Name</label>
+              <input id="reg-name" type="text" required placeholder="Your full name"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Email Address</label>
+              <input id="reg-email" type="email" required placeholder="you@company.com"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Department</label>
+              <input id="reg-dept" type="text" placeholder="e.g. Finance, HR, Operations"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Password</label>
+              <input id="reg-pass" type="password" required placeholder="Min 6 characters"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Confirm Password</label>
+              <input id="reg-pass2" type="password" required placeholder="Repeat password"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+            </div>
+            <div id="reg-error" class="hidden text-red-500 text-xs bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-center"></div>
+            <div id="reg-ok"    class="hidden text-green-600 text-xs bg-green-50 px-3 py-2 rounded-lg border border-green-100 text-center"></div>
+            <button type="submit"
+              class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
+              Create Account
+            </button>
+          </form>
+          <p class="text-xs text-center mt-3 ${dark ? 'text-slate-500' : 'text-slate-400'}">
+            New accounts are pending until approved by an admin.
+          </p>
+        </div>
+
+        <p class="text-center text-xs mt-5 ${dark ? 'text-slate-600' : 'text-slate-400'}">IT Ticketing System · Company Internal</p>
       </div>
-      <form id="login-form" class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
-          <input id="login-email" type="email" required autofocus placeholder="you@company.com"
-            class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
-          <input id="login-password" type="password" required placeholder="••••••••"
-            class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-        </div>
-        <div id="login-error" class="hidden text-red-600 text-sm bg-red-50 px-3 py-2.5 rounded-lg border border-red-100 text-center"></div>
-        <button type="submit"
-          class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
-          Sign In
-        </button>
-      </form>
-      <p class="text-center text-xs text-slate-400 mt-6">Contact your IT administrator if you need access.</p>
     </div>
   </div>`;
 }
 
+function switchTab(tab) {
+  const dark = document.documentElement.classList.contains('dark');
+  const si = document.getElementById('panel-signin');
+  const rg = document.getElementById('panel-register');
+  const ts = document.getElementById('tab-signin');
+  const tr = document.getElementById('tab-register');
+  const activeClass = dark ? 'bg-slate-600 text-white shadow' : 'bg-white text-slate-900 shadow';
+  const inactiveClass = dark ? 'text-slate-400' : 'text-slate-500';
+
+  if (tab === 'signin') {
+    si.classList.remove('hidden'); rg.classList.add('hidden');
+    ts.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeClass}`;
+    tr.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${inactiveClass}`;
+  } else {
+    rg.classList.remove('hidden'); si.classList.add('hidden');
+    tr.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeClass}`;
+    ts.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${inactiveClass}`;
+  }
+}
+
 function bindLogin() {
+  // Dark mode toggle
+  document.getElementById('dm-toggle')?.addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark');
+    Store.set('darkMode', document.documentElement.classList.contains('dark'));
+    render('login');
+  });
+
+  // Sign in
   document.getElementById('login-form').addEventListener('submit', e => {
     e.preventDefault();
     const ok = login(
@@ -378,6 +524,33 @@ function bindLogin() {
       err.textContent = 'Invalid email or password. Please try again.';
       err.classList.remove('hidden');
     }
+  });
+
+  // Register
+  document.getElementById('register-form')?.addEventListener('submit', e => {
+    e.preventDefault();
+    const name  = document.getElementById('reg-name').value.trim();
+    const email = document.getElementById('reg-email').value.trim().toLowerCase();
+    const dept  = document.getElementById('reg-dept').value.trim();
+    const pass  = document.getElementById('reg-pass').value;
+    const pass2 = document.getElementById('reg-pass2').value;
+    const errEl = document.getElementById('reg-error');
+    const okEl  = document.getElementById('reg-ok');
+    errEl.classList.add('hidden'); okEl.classList.add('hidden');
+
+    if (!name || !email || !pass) { errEl.textContent='All fields are required.'; errEl.classList.remove('hidden'); return; }
+    if (pass.length < 6)          { errEl.textContent='Password must be at least 6 characters.'; errEl.classList.remove('hidden'); return; }
+    if (pass !== pass2)           { errEl.textContent='Passwords do not match.'; errEl.classList.remove('hidden'); return; }
+
+    const users = Store.get('users',[]);
+    if (users.find(u => u.email === email)) { errEl.textContent='That email is already registered.'; errEl.classList.remove('hidden'); return; }
+
+    users.push({ id: Date.now().toString(), name, email, password: pass, dept, role:'user', active: false, deleted: false, pendingApproval: true });
+    Store.set('users', users);
+
+    okEl.textContent = '✅ Account created! An admin must activate it before you can sign in.';
+    okEl.classList.remove('hidden');
+    document.getElementById('register-form').reset();
   });
 }
 
@@ -766,8 +939,8 @@ function renderTicketDetail(ticketId) {
                   </div>`).join('')}
               </div>`}
           <div class="px-5 py-4 border-t border-slate-100 bg-slate-50 rounded-b-xl">
-            <textarea id="comment-body" rows="3" placeholder="Write a comment…"
-              class="w-full border border-slate-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-3"></textarea>
+            <textarea id="comment-body" rows="2" placeholder="Comment…"
+              class="w-full border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-2"></textarea>
             <div class="flex gap-2">
               <button id="btn-comment" data-id="${ticket.id}"
                 class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">Add Comment</button>
@@ -1116,6 +1289,12 @@ function bindNav() {
     });
   });
   document.getElementById('btn-logout')?.addEventListener('click', logout);
+  document.getElementById('btn-dm')?.addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark');
+    Store.set('darkMode', document.documentElement.classList.contains('dark'));
+    const btn = document.getElementById('btn-dm');
+    if (btn) btn.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
+  });
 }
 
 function bindPageEvents(page, params) {
@@ -1237,9 +1416,88 @@ function bindPageEvents(page, params) {
 }
 
 // ================================================================
+// MOUSE EFFECTS — Rainbow gradient + splash
+// ================================================================
+(function() {
+  const canvas  = document.getElementById('mouse-canvas');
+  const ctx     = canvas.getContext('2d');
+  let trails    = [];
+  let inactiveTimer = null;
+  let fading    = false;
+  let globalAlpha = 1;
+
+  function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function hslStr(h) { return `hsl(${h},100%,60%)`; }
+
+  let hue = 0;
+  window.addEventListener('mousemove', e => {
+    hue = (hue + 3) % 360;
+    trails.push({ x: e.clientX, y: e.clientY, h: hue, r: 28, alpha: 0.55, born: Date.now() });
+    if (trails.length > 60) trails.shift();
+
+    // Reset fade timer
+    fading = false;
+    globalAlpha = 1;
+    canvas.style.opacity = 1;
+    clearTimeout(inactiveTimer);
+    inactiveTimer = setTimeout(() => { fading = true; }, 2000);
+  });
+
+  // Splash on click
+  window.addEventListener('click', e => {
+    const colors = ['#f472b6','#818cf8','#34d399','#fbbf24','#60a5fa','#f87171'];
+    for (let i = 0; i < 5; i++) {
+      const ring    = document.createElement('div');
+      const size    = 40 + i * 35;
+      const color   = colors[i % colors.length];
+      ring.className = 'splash-ring';
+      ring.style.cssText = `
+        left:${e.clientX}px; top:${e.clientY}px;
+        width:${size}px; height:${size}px;
+        border-color:${color};
+        animation-duration:${0.5 + i * 0.12}s;
+        animation-delay:${i * 0.04}s;
+      `;
+      document.body.appendChild(ring);
+      setTimeout(() => ring.remove(), 900);
+    }
+  });
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (fading) {
+      globalAlpha = Math.max(0, globalAlpha - 0.018);
+      canvas.style.opacity = globalAlpha;
+    }
+    const now = Date.now();
+    trails = trails.filter(t => now - t.born < 900);
+    trails.forEach((t, i) => {
+      const age  = (now - t.born) / 900;
+      const r    = t.r * (1 - age * 0.5);
+      const a    = t.alpha * (1 - age);
+      const grad = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, r);
+      grad.addColorStop(0, `hsla(${t.h},100%,65%,${a})`);
+      grad.addColorStop(0.5, `hsla(${(t.h+40)%360},100%,60%,${a * 0.5})`);
+      grad.addColorStop(1, `hsla(${(t.h+80)%360},100%,55%,0)`);
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ================================================================
 // START
 // ================================================================
 initStorage();
+// Restore dark mode preference
+if (Store.get('darkMode', false)) document.documentElement.classList.add('dark');
 restoreSession() ? render('dashboard') : render('login');
 
 </script>
