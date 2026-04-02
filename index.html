@@ -6,57 +6,75 @@
 <title>IT Ticketing System</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body class="bg-gray-50 font-sans">
-
 <div id="root"></div>
-
 <script>
+
 // ================================================================
-// ✏️  SETTINGS — Edit this section to customize your system
+// ✏️  CONFIGURATION
 // ================================================================
 const CONFIG = {
   title: 'IT Ticketing System',
+
+  // ✏️  EMAIL NOTIFICATIONS (EmailJS — free at https://emailjs.com)
+  // Setup steps:
+  //   1. Create account at emailjs.com
+  //   2. Add an Email Service (Gmail, Outlook, etc.)
+  //   3. Create a Template. Use these variables in your template body:
+  //        {{to_name}}  {{to_email}}  {{subject}}
+  //        {{message}}  {{ticket_number}}  {{ticket_title}}  {{portal_url}}
+  //   4. Paste your keys below
+  emailJS: {
+    publicKey:  '',   // ← Your EmailJS Public Key
+    serviceId:  '',   // ← Your Service ID  e.g. 'service_abc123'
+    templateId: '',   // ← Your Template ID e.g. 'template_abc123'
+  },
+
+  // ✏️  Support email displayed to users
+  supportEmail: 'support@yourcompany.com',
+
+  // ✏️  Your live URL (used in notification emails)
+  portalUrl: '',  // e.g. 'https://televlog.github.io/it-ticketing-html/'
 };
 
 // ================================================================
-// ✏️  DEFAULT USERS — Add or edit users here
-//     Roles: 'admin', 'agent', 'user'
-//     Password is plain text — users can be changed in Admin > Users
+// ✏️  DEFAULT USERS  (role: 'admin' | 'agent' | 'user')
 // ================================================================
 const DEFAULT_USERS = [
-  { id: '1', name: 'System Admin',   email: 'admin@company.com',  password: 'Admin123!', role: 'admin', dept: 'IT',           active: true },
-  { id: '2', name: 'Sarah Johnson',  email: 'agent@company.com',  password: 'Agent123!', role: 'agent', dept: 'IT Support',   active: true },
-  { id: '3', name: 'Alice Williams', email: 'user@company.com',   password: 'User123!',  role: 'user',  dept: 'Finance',      active: true },
+  { id:'1', name:'System Admin',   email:'admin@company.com',  password:'Admin123!', role:'admin', dept:'IT',         active:true,  deleted:false },
+  { id:'2', name:'Sarah Johnson',  email:'agent@company.com',  password:'Agent123!', role:'agent', dept:'IT Support', active:true,  deleted:false },
+  { id:'3', name:'Alice Williams', email:'user@company.com',   password:'User123!',  role:'user',  dept:'Finance',    active:true,  deleted:false },
 ];
 
 // ================================================================
-// ✏️  CATEGORIES — Edit ticket categories here
+// ✏️  CATEGORIES
 // ================================================================
 const DEFAULT_CATEGORIES = [
-  { id: '1', name: 'IT General', icon: '💻', color: '#6366f1' },
-  { id: '2', name: 'Network',    icon: '🌐', color: '#0ea5e9' },
-  { id: '3', name: 'Software',   icon: '⚙️', color: '#10b981' },
-  { id: '4', name: 'Hardware',   icon: '🖥️', color: '#f59e0b' },
-  { id: '5', name: 'Other',      icon: '📋', color: '#8b5cf6' },
+  { id:'1', name:'IT General', icon:'💻', color:'#6366f1' },
+  { id:'2', name:'Network',    icon:'🌐', color:'#0ea5e9' },
+  { id:'3', name:'Software',   icon:'⚙️', color:'#10b981' },
+  { id:'4', name:'Hardware',   icon:'🖥️', color:'#f59e0b' },
+  { id:'5', name:'Other',      icon:'📋', color:'#8b5cf6' },
 ];
 
 // ================================================================
-// STORAGE — Data saved in browser localStorage
+// STORAGE
 // ================================================================
-const Storage = {
-  get: (key, def) => {
-    try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : def; }
-    catch { return def; }
-  },
-  set: (key, val) => localStorage.setItem(key, JSON.stringify(val)),
+const Store = {
+  get: (k,d) => { try{const v=localStorage.getItem(k);return v!==null?JSON.parse(v):d}catch{return d} },
+  set: (k,v) => localStorage.setItem(k,JSON.stringify(v)),
 };
 
 function initStorage() {
-  if (Storage.get('users', null) === null)      Storage.set('users', DEFAULT_USERS);
-  if (Storage.get('categories', null) === null) Storage.set('categories', DEFAULT_CATEGORIES);
-  if (Storage.get('tickets', null) === null)    Storage.set('tickets', []);
-  if (Storage.get('ticketSeq', null) === null)  Storage.set('ticketSeq', 0);
+  if (Store.get('users',null)      === null) Store.set('users', DEFAULT_USERS);
+  if (Store.get('categories',null) === null) Store.set('categories', DEFAULT_CATEGORIES);
+  if (Store.get('tickets',null)    === null) Store.set('tickets', []);
+  if (Store.get('ticketSeq',null)  === null) Store.set('ticketSeq', 0);
+  // Migrate old users that don't have deleted field
+  const users = Store.get('users',[]).map(u => ({ deleted:false, ...u }));
+  Store.set('users', users);
 }
 
 // ================================================================
@@ -65,22 +83,25 @@ function initStorage() {
 let currentUser = null;
 
 function login(email, password) {
-  const user = Storage.get('users', []).find(u => u.email === email && u.password === password && u.active);
+  const user = Store.get('users',[]).find(u =>
+    u.email === email && u.password === password && u.active && !u.deleted
+  );
   if (!user) return false;
   currentUser = user;
   sessionStorage.setItem('cu', JSON.stringify(user));
   return true;
 }
 
-function logout() {
-  currentUser = null;
-  sessionStorage.removeItem('cu');
-  render('login');
-}
+function logout() { currentUser = null; sessionStorage.removeItem('cu'); render('login'); }
 
 function restoreSession() {
   const s = sessionStorage.getItem('cu');
-  if (s) { currentUser = JSON.parse(s); return true; }
+  if (s) {
+    const saved = JSON.parse(s);
+    const live  = Store.get('users',[]).find(u => u.id === saved.id && u.active && !u.deleted);
+    if (live) { currentUser = live; return true; }
+    sessionStorage.removeItem('cu');
+  }
   return false;
 }
 
@@ -88,164 +109,224 @@ const isAdmin = () => currentUser?.role === 'admin';
 const isAgent = () => currentUser?.role === 'agent' || currentUser?.role === 'admin';
 
 // ================================================================
-// DATA HELPERS
+// EMAIL (EmailJS)
 // ================================================================
-const getTickets    = () => Storage.get('tickets', []);
-const getUsers      = () => Storage.get('users', []);
-const getCategories = () => Storage.get('categories', []);
-
-function createTicket(data) {
-  const seq = Storage.get('ticketSeq', 0) + 1;
-  Storage.set('ticketSeq', seq);
-  const ticket = {
-    id: Date.now().toString(),
-    number: 'TKT-' + String(seq).padStart(4, '0'),
-    title: data.title,
-    description: data.description,
-    status: 'open',
-    priority: data.priority || 'medium',
-    category: data.category || '1',
-    requesterId: currentUser.id,
-    requesterName: currentUser.name,
-    requesterEmail: currentUser.email,
-    assigneeId: data.assigneeId || null,
-    comments: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  const tickets = getTickets();
-  tickets.push(ticket);
-  Storage.set('tickets', tickets);
-  return ticket;
+function emailReady() {
+  return !!(CONFIG.emailJS.publicKey && CONFIG.emailJS.serviceId && CONFIG.emailJS.templateId);
 }
 
-function updateTicket(id, updates) {
-  const tickets = getTickets();
-  const i = tickets.findIndex(t => t.id === id);
+async function sendEmail(toEmail, toName, subject, message, ticket) {
+  if (!emailReady()) return false;
+  try {
+    emailjs.init(CONFIG.emailJS.publicKey);
+    await emailjs.send(CONFIG.emailJS.serviceId, CONFIG.emailJS.templateId, {
+      to_email:      toEmail,
+      to_name:       toName,
+      subject:       subject,
+      message:       message,
+      ticket_number: ticket?.number  || '',
+      ticket_title:  ticket?.title   || '',
+      portal_url:    CONFIG.portalUrl || window.location.href,
+    });
+    return true;
+  } catch(e) { console.error('EmailJS error:', e); return false; }
+}
+
+// ================================================================
+// DATA HELPERS
+// ================================================================
+const getTickets    = () => Store.get('tickets', []);
+const getUsers      = () => Store.get('users',[]).filter(u => !u.deleted);       // active records
+const getAllUsers    = () => Store.get('users',[]);                                // incl. deleted (for history)
+const getCategories = () => Store.get('categories', []);
+
+function createTicket(data) {
+  const seq = Store.get('ticketSeq',0) + 1;
+  Store.set('ticketSeq', seq);
+  const t = {
+    id:             Date.now().toString(),
+    number:         'TKT-' + String(seq).padStart(4,'0'),
+    title:          data.title,
+    description:    data.description,
+    status:         'open',
+    priority:       data.priority   || 'medium',
+    category:       data.category   || '1',
+    requesterId:    currentUser.id,
+    requesterName:  currentUser.name,
+    requesterEmail: currentUser.email,
+    assigneeId:     data.assigneeId || null,
+    history:        [{ action:'Ticket created', by:currentUser.name, at:new Date().toISOString() }],
+    comments:       [],
+    resolvedAt:     null,
+    closedAt:       null,
+    createdAt:      new Date().toISOString(),
+    updatedAt:      new Date().toISOString(),
+  };
+  const all = getTickets(); all.push(t); Store.set('tickets', all);
+  return t;
+}
+
+async function updateTicket(id, updates) {
+  const all = getTickets();
+  const i   = all.findIndex(t => t.id === id);
   if (i === -1) return null;
-  tickets[i] = { ...tickets[i], ...updates, updatedAt: new Date().toISOString() };
-  Storage.set('tickets', tickets);
-  return tickets[i];
+  const old = { ...all[i] };
+
+  // Build history entry
+  const changes = [];
+  if (updates.status    && updates.status    !== old.status)   changes.push(`Status: ${STATUS_LABELS[old.status]||old.status} → ${STATUS_LABELS[updates.status]}`);
+  if (updates.priority  && updates.priority  !== old.priority) changes.push(`Priority: ${old.priority} → ${updates.priority}`);
+  if ('assigneeId' in updates && updates.assigneeId !== old.assigneeId) {
+    const a = getAllUsers().find(u => u.id === updates.assigneeId);
+    changes.push(`Assigned to: ${a ? a.name : 'Unassigned'}`);
+  }
+  if (changes.length) {
+    all[i].history = all[i].history || [];
+    all[i].history.push({ action: changes.join(' | '), by: currentUser.name, at: new Date().toISOString() });
+  }
+
+  if (updates.status === 'resolved' && !old.resolvedAt) updates.resolvedAt = new Date().toISOString();
+  if (updates.status === 'closed'   && !old.closedAt)   updates.closedAt   = new Date().toISOString();
+
+  all[i] = { ...all[i], ...updates, updatedAt: new Date().toISOString() };
+  Store.set('tickets', all);
+
+  // Send email notification when ticket is closed
+  if (updates.status === 'closed' && old.status !== 'closed' && old.requesterEmail) {
+    const sent = await sendEmail(
+      old.requesterEmail,
+      old.requesterName,
+      `Your ticket ${old.number} has been closed`,
+      `Hi ${old.requesterName},\n\nYour IT support ticket "${old.title}" (${old.number}) has been resolved and closed by our team.\n\nIf the issue persists or you need further assistance, please submit a new ticket.\n\nThank you for contacting IT Support.`,
+      old
+    );
+    if (sent) showToast(`✉️ Closure email sent to ${old.requesterEmail}`);
+    else if (emailReady()) showToast('⚠️ Email send failed — check EmailJS config', 'warning');
+  }
+
+  return all[i];
 }
 
 function addComment(ticketId, body, isInternal) {
-  const tickets = getTickets();
-  const ticket = tickets.find(t => t.id === ticketId);
-  if (!ticket) return;
-  ticket.comments = ticket.comments || [];
-  ticket.comments.push({
-    id: Date.now().toString(),
-    authorId: currentUser.id,
-    authorName: currentUser.name,
-    body, isInternal,
-    createdAt: new Date().toISOString(),
-  });
-  ticket.updatedAt = new Date().toISOString();
-  Storage.set('tickets', tickets);
+  const all = getTickets();
+  const t   = all.find(t => t.id === ticketId);
+  if (!t) return;
+  t.comments = t.comments || [];
+  t.comments.push({ id: Date.now().toString(), authorId: currentUser.id, authorName: currentUser.name, body, isInternal, createdAt: new Date().toISOString() });
+  t.history = t.history || [];
+  t.history.push({ action: isInternal ? 'Internal note added' : 'Comment added', by: currentUser.name, at: new Date().toISOString() });
+  t.updatedAt = new Date().toISOString();
+  Store.set('tickets', all);
 }
 
 // ================================================================
 // UTILITIES
 // ================================================================
-function formatDate(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' });
+function fmt(iso) { if(!iso) return '—'; return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+function ago(iso) { const m=Math.floor((Date.now()-new Date(iso))/60000); if(m<1)return 'just now'; if(m<60)return m+'m ago'; if(m<1440)return Math.floor(m/60)+'h ago'; return Math.floor(m/1440)+'d ago'; }
+function resTime(t) { if(!t.resolvedAt&&!t.closedAt)return '—'; const h=Math.round((new Date(t.resolvedAt||t.closedAt)-new Date(t.createdAt))/3600000); return h<24?h+'h':Math.floor(h/24)+'d '+(h%24)+'h'; }
+
+const STATUS_LABELS  = { open:'Open', in_progress:'In Progress', pending:'Pending', resolved:'Resolved', closed:'Closed' };
+const STATUS_COLORS  = { open:'bg-blue-100 text-blue-700', in_progress:'bg-yellow-100 text-yellow-700', pending:'bg-orange-100 text-orange-700', resolved:'bg-green-100 text-green-700', closed:'bg-slate-100 text-slate-500' };
+const PRIORITY_COLORS= { low:'bg-slate-100 text-slate-600', medium:'bg-blue-100 text-blue-700', high:'bg-orange-100 text-orange-700', critical:'bg-red-100 text-red-700' };
+
+const bdg  = (lbl,cls) => `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${lbl}</span>`;
+const avtr = (name,sz='w-7 h-7') => `<div class="${sz} rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs flex-shrink-0">${(name||'?').charAt(0).toUpperCase()}</div>`;
+
+function exportCSV(rows, filename) {
+  const csv = rows.map(r => r.map(c => `"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a   = document.createElement('a');
+  a.href    = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = filename; a.click();
 }
 
-function timeAgo(iso) {
-  const m = Math.floor((Date.now() - new Date(iso)) / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return m + 'm ago';
-  if (m < 1440) return Math.floor(m/60) + 'h ago';
-  return Math.floor(m/1440) + 'd ago';
+// ================================================================
+// TOAST
+// ================================================================
+function showToast(msg, type='success') {
+  const color = type==='error'?'bg-red-600':type==='warning'?'bg-amber-500':'bg-emerald-600';
+  const t = document.createElement('div');
+  t.className = `fixed bottom-5 right-5 ${color} text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium z-50`;
+  t.textContent = msg; document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
 }
-
-const STATUS_LABELS = { open:'Open', in_progress:'In Progress', pending:'Pending', resolved:'Resolved', closed:'Closed' };
-const STATUS_COLORS = { open:'bg-blue-100 text-blue-700', in_progress:'bg-yellow-100 text-yellow-700', pending:'bg-orange-100 text-orange-700', resolved:'bg-green-100 text-green-700', closed:'bg-slate-100 text-slate-500' };
-const PRIORITY_COLORS = { low:'bg-slate-100 text-slate-600', medium:'bg-blue-100 text-blue-700', high:'bg-orange-100 text-orange-700', critical:'bg-red-100 text-red-700' };
-
-const badge = (label, cls) => `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${label}</span>`;
-const avatar = (name, size='w-7 h-7') => `<div class="${size} rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs flex-shrink-0">${name.charAt(0)}</div>`;
 
 // ================================================================
 // ROUTER
 // ================================================================
-let currentPage = 'dashboard';
-let currentTicketId = null;
+let currentPage = 'dashboard', currentTicketId = null;
 
-function render(page, params = {}) {
+function render(page, params={}) {
+  // Access control
+  if (page === 'reports' && !isAdmin()) { showToast('Access denied — Admins only','error'); return; }
+  if (page === 'users'   && !isAdmin()) { showToast('Access denied — Admins only','error'); return; }
+
   currentPage = page;
   if (params.ticketId) currentTicketId = params.ticketId;
   const root = document.getElementById('root');
-
-  if (page === 'login') {
-    root.innerHTML = renderLogin();
-    bindLogin();
-    return;
-  }
-
+  if (page === 'login') { root.innerHTML = renderLogin(); bindLogin(); return; }
   root.innerHTML = renderShell(getPageContent(page, params));
-  bindNav();
-  bindPageEvents(page, params);
+  bindNav(); bindPageEvents(page, params);
 }
 
 function getPageContent(page, params) {
-  switch (page) {
+  switch(page) {
     case 'dashboard':  return renderDashboard();
     case 'tickets':    return renderTicketList(params);
     case 'new-ticket': return renderNewTicket();
     case 'ticket':     return renderTicketDetail(params.ticketId);
-    case 'reports':    return renderReports();
+    case 'reports':    return renderReports(params);
     case 'users':      return renderUsers();
     default:           return renderDashboard();
   }
 }
 
 // ================================================================
-// SHELL / LAYOUT
+// LAYOUT / SHELL
 // ================================================================
 function renderShell(content) {
   const links = [
-    { page:'dashboard',  label:'Dashboard',  icon:'📊' },
-    { page:'tickets',    label:'Tickets',     icon:'🎫' },
-    { page:'new-ticket', label:'New Ticket',  icon:'➕' },
-    ...(isAgent() ? [{ page:'reports', label:'Reports', icon:'📈' }] : []),
-    ...(isAdmin() ? [{ page:'users',   label:'Users',   icon:'👥' }] : []),
+    { page:'dashboard',  label:'Dashboard', icon:'📊' },
+    { page:'tickets',    label:'Tickets',   icon:'🎫' },
+    { page:'new-ticket', label:'New Ticket',icon:'➕' },
+    ...(isAdmin() ? [
+      { page:'reports', label:'Reports', icon:'📈' },
+      { page:'users',   label:'Users',   icon:'👥' },
+    ] : []),
   ];
 
   return `
-    <div class="flex h-screen overflow-hidden">
-      <!-- Sidebar -->
-      <aside class="w-56 bg-slate-900 flex flex-col flex-shrink-0">
-        <div class="p-4 border-b border-slate-700">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xs">IT</div>
-            <div class="text-white font-semibold text-sm leading-snug">IT Ticketing<br><span class="text-slate-400 font-normal text-xs">System</span></div>
+  <div class="flex h-screen overflow-hidden">
+    <aside class="w-56 bg-slate-900 flex flex-col flex-shrink-0">
+      <div class="p-4 border-b border-slate-700">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">IT</div>
+          <div>
+            <div class="text-white font-semibold text-sm leading-tight">IT Ticketing</div>
+            <div class="text-slate-400 text-xs">System</div>
           </div>
         </div>
-        <nav class="flex-1 p-3 space-y-1">
-          ${links.map(l => `
-            <a href="#" data-page="${l.page}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-              ${currentPage === l.page ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700 hover:text-white'}">
-              <span>${l.icon}</span><span>${l.label}</span>
-            </a>`).join('')}
-        </nav>
-        <div class="p-3 border-t border-slate-700">
-          <div class="flex items-center gap-2 px-2 py-2">
-            ${avatar(currentUser.name, 'w-7 h-7')}
-            <div class="flex-1 min-w-0">
-              <div class="text-white text-xs font-medium truncate">${currentUser.name}</div>
-              <div class="text-slate-400 text-xs capitalize">${currentUser.role}</div>
-            </div>
-            <button id="btn-logout" title="Sign Out" class="text-slate-400 hover:text-white text-base leading-none">⏏</button>
+      </div>
+      <nav class="flex-1 p-3 space-y-1">
+        ${links.map(l => `
+          <a href="#" data-page="${l.page}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
+            ${currentPage === l.page ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700 hover:text-white'}">
+            <span>${l.icon}</span><span>${l.label}</span>
+          </a>`).join('')}
+      </nav>
+      <div class="p-3 border-t border-slate-700">
+        <div class="flex items-center gap-2 px-2 py-2">
+          ${avtr(currentUser.name)}
+          <div class="flex-1 min-w-0">
+            <div class="text-white text-xs font-medium truncate">${currentUser.name}</div>
+            <div class="text-slate-400 text-xs capitalize">${currentUser.role}</div>
           </div>
+          <button id="btn-logout" title="Sign Out" class="text-slate-400 hover:text-white text-base">⏏</button>
         </div>
-      </aside>
-      <!-- Main -->
-      <main class="flex-1 overflow-auto bg-slate-50">
-        ${content}
-      </main>
-    </div>`;
+      </div>
+    </aside>
+    <main class="flex-1 overflow-auto bg-slate-50">${content}</main>
+  </div>`;
 }
 
 // ================================================================
@@ -253,56 +334,41 @@ function renderShell(content) {
 // ================================================================
 function renderLogin() {
   return `
-    <div class="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
-      <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-        <div class="text-center mb-8">
-          <div class="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">🎫</div>
-          <h1 class="text-2xl font-bold text-slate-900">IT Ticketing System</h1>
-          <p class="text-slate-500 text-sm mt-1">Sign in to continue</p>
-        </div>
-        <form id="login-form" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
-            <input id="login-email" type="email" required placeholder="you@company.com"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
-            <input id="login-password" type="password" required placeholder="••••••••"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-          </div>
-          <div id="login-error" class="hidden text-red-500 text-sm text-center bg-red-50 p-2 rounded-lg"></div>
-          <button type="submit"
-            class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 transition-colors">
-            Sign In
-          </button>
-        </form>
-        <!-- Sample Accounts -->
-        <div class="mt-6 p-4 bg-slate-50 rounded-xl">
-          <p class="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Quick login</p>
-          <div class="space-y-1">
-            ${DEFAULT_USERS.map(u => `
-              <button type="button" onclick="quickFill('${u.email}','${u.password}')"
-                class="w-full text-left flex justify-between items-center px-2 py-1.5 rounded hover:bg-white transition-colors">
-                <span class="font-mono text-xs text-slate-600">${u.email}</span>
-                <span class="text-xs text-indigo-500 font-semibold capitalize">${u.role}</span>
-              </button>`).join('')}
-          </div>
-        </div>
+  <div class="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
+    <div class="absolute inset-0 opacity-10" style="background-image:radial-gradient(circle,#6366f1 1px,transparent 1px);background-size:32px 32px"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+      <div class="text-center mb-8">
+        <div class="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg text-2xl">🎫</div>
+        <h1 class="text-2xl font-bold text-slate-900">IT Ticketing System</h1>
+        <p class="text-slate-500 text-sm mt-1">Sign in with your company email</p>
       </div>
-    </div>`;
-}
-
-function quickFill(email, password) {
-  document.getElementById('login-email').value = email;
-  document.getElementById('login-password').value = password;
+      <form id="login-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
+          <input id="login-email" type="email" required autofocus placeholder="you@company.com"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+          <input id="login-password" type="password" required placeholder="••••••••"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+        <div id="login-error" class="hidden text-red-600 text-sm bg-red-50 px-3 py-2.5 rounded-lg border border-red-100 text-center"></div>
+        <button type="submit"
+          class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
+          Sign In
+        </button>
+      </form>
+      <p class="text-center text-xs text-slate-400 mt-6">Contact your IT administrator if you need access.</p>
+    </div>
+  </div>`;
 }
 
 function bindLogin() {
   document.getElementById('login-form').addEventListener('submit', e => {
     e.preventDefault();
     const ok = login(
-      document.getElementById('login-email').value,
+      document.getElementById('login-email').value.trim().toLowerCase(),
       document.getElementById('login-password').value
     );
     if (ok) {
@@ -316,584 +382,727 @@ function bindLogin() {
 }
 
 // ================================================================
-// DASHBOARD PAGE
+// DASHBOARD
 // ================================================================
 function renderDashboard() {
-  const all = getTickets();
-  const tickets = isAgent() ? all : all.filter(t => t.requesterId === currentUser.id);
+  const all  = getTickets();
+  const mine = isAgent() ? all : all.filter(t => t.requesterId === currentUser.id);
   const cats = getCategories();
 
-  const stats = [
-    { label:'Open',        val: tickets.filter(t=>t.status==='open').length,        icon:'🔵', bg:'bg-blue-50',   text:'text-blue-600'   },
-    { label:'In Progress', val: tickets.filter(t=>t.status==='in_progress').length, icon:'🟡', bg:'bg-yellow-50', text:'text-yellow-600' },
-    { label:'Resolved',    val: tickets.filter(t=>t.status==='resolved').length,    icon:'🟢', bg:'bg-green-50',  text:'text-green-600'  },
-    { label:'Total',       val: tickets.length,                                      icon:'📋', bg:'bg-slate-50',  text:'text-slate-600'  },
-  ];
+  const counts = {
+    total:       mine.length,
+    open:        mine.filter(t => t.status === 'open').length,
+    in_progress: mine.filter(t => t.status === 'in_progress').length,
+    pending:     mine.filter(t => t.status === 'pending').length,
+    resolved:    mine.filter(t => t.status === 'resolved').length,
+    closed:      mine.filter(t => t.status === 'closed').length,
+  };
+  const critical = mine.filter(t => t.priority === 'critical' && ['open','in_progress','pending'].includes(t.status)).length;
 
-  const recent = [...tickets].sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt)).slice(0,6);
+  // Category breakdown (open tickets only)
+  const catBreakdown = cats.map(c => ({
+    ...c,
+    count: mine.filter(t => t.category === c.id && !['resolved','closed'].includes(t.status)).length,
+  })).filter(c => c.count > 0).sort((a,b) => b.count - a.count);
+
+  // Agent workload
+  const agentLoad = isAgent()
+    ? getUsers().filter(u => u.role === 'agent' || u.role === 'admin').map(a => ({
+        ...a,
+        open: all.filter(t => t.assigneeId === a.id && ['open','in_progress','pending'].includes(t.status)).length,
+      })).sort((a,b) => b.open - a.open)
+    : [];
+
+  // Last 7 days trend
+  const days    = Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); return d; });
+  const dayLabels = days.map(d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  const dayData   = days.map(d=>mine.filter(t=>new Date(t.createdAt).toDateString()===d.toDateString()).length);
+
+  // Recent activity
+  const activity = [...mine].sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt)).slice(0,6);
 
   return `
-    <div class="p-6 max-w-5xl">
-      <div class="mb-6">
+  <div class="p-6">
+    <div class="flex items-center justify-between mb-6">
+      <div>
         <h1 class="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p class="text-slate-500 text-sm mt-1">Welcome back, ${currentUser.name} 👋</p>
+        <p class="text-slate-500 text-sm mt-0.5">Welcome back, <strong>${currentUser.name}</strong> &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</p>
+      </div>
+      <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">+ New Ticket</a>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="grid grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      ${[
+        { label:'Total',       val:counts.total,       bg:'bg-white',          num:'text-slate-900',   border:'border-slate-100', status:''           },
+        { label:'Open',        val:counts.open,        bg:'bg-blue-50',        num:'text-blue-700',    border:'border-blue-100',  status:'open'        },
+        { label:'In Progress', val:counts.in_progress, bg:'bg-yellow-50',      num:'text-yellow-700',  border:'border-yellow-100',status:'in_progress' },
+        { label:'Pending',     val:counts.pending,     bg:'bg-orange-50',      num:'text-orange-700',  border:'border-orange-100',status:'pending'     },
+        { label:'Resolved',    val:counts.resolved,    bg:'bg-green-50',       num:'text-green-700',   border:'border-green-100', status:'resolved'    },
+        { label:'Closed',      val:counts.closed,      bg:'bg-slate-100',      num:'text-slate-600',   border:'border-slate-200', status:'closed'      },
+      ].map(s => `
+        <div class="${s.bg} border ${s.border} rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow ${s.status?'cursor-pointer':''}"
+          ${s.status?`onclick="render('tickets',{status:'${s.status}'})"`:''}">
+          <div class="text-xs font-medium text-slate-500 mb-2">${s.label}</div>
+          <div class="text-3xl font-bold ${s.num}">${s.val}</div>
+        </div>`).join('')}
+    </div>
+
+    <!-- Critical Alert -->
+    ${critical > 0 ? `
+    <div class="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 flex items-center gap-3">
+      <span class="text-2xl">🚨</span>
+      <div class="flex-1">
+        <div class="font-semibold text-red-800">${critical} critical ticket${critical>1?'s':''} need${critical===1?'s':''} immediate attention</div>
+        <a href="#" data-page="tickets" data-priority="critical" class="text-red-600 hover:underline text-sm">View critical tickets →</a>
+      </div>
+    </div>` : ''}
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+
+      <!-- Status Donut -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <h3 class="font-semibold text-slate-800 mb-4 text-sm">Ticket Status Overview</h3>
+        <canvas id="dash-status" height="190"></canvas>
       </div>
 
-      <!-- Stats -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        ${stats.map(s => `
-          <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-slate-500 text-sm font-medium">${s.label}</span>
-              <span class="text-xl">${s.icon}</span>
-            </div>
-            <div class="text-3xl font-bold text-slate-900">${s.val}</div>
-          </div>`).join('')}
+      <!-- 7-Day Trend -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <h3 class="font-semibold text-slate-800 mb-4 text-sm">Last 7 Days</h3>
+        <canvas id="dash-trend" height="190"></canvas>
       </div>
 
-      <!-- Recent Tickets -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100">
+      <!-- Category Breakdown -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <h3 class="font-semibold text-slate-800 mb-4 text-sm">Open by Category</h3>
+        ${catBreakdown.length === 0
+          ? '<div class="text-center text-slate-400 text-sm py-10">No open tickets 🎉</div>'
+          : catBreakdown.map(c => `
+            <div class="flex items-center gap-2 mb-3">
+              <span>${c.icon}</span>
+              <div class="flex-1">
+                <div class="flex justify-between text-xs mb-1">
+                  <span class="text-slate-700 font-medium">${c.name}</span>
+                  <span class="font-semibold text-slate-600">${c.count}</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-1.5">
+                  <div class="h-1.5 rounded-full transition-all" style="width:${Math.min(100,c.count/(catBreakdown[0].count||1)*100)}%;background:${c.color}"></div>
+                </div>
+              </div>
+            </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Agent Workload + Recent Activity -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+      <!-- Agent Workload / My Summary -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        ${isAgent() ? `
+          <h3 class="font-semibold text-slate-800 mb-4 text-sm">Agent Workload</h3>
+          ${agentLoad.length === 0
+            ? '<div class="text-slate-400 text-sm text-center py-4">No agents found</div>'
+            : agentLoad.map(a => `
+              <div class="flex items-center gap-2 mb-3 p-2 rounded-lg hover:bg-slate-50">
+                ${avtr(a.name,'w-7 h-7')}
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-medium text-slate-700 truncate">${a.name}</div>
+                  <div class="text-xs text-slate-400 capitalize">${a.role}</div>
+                </div>
+                <div class="text-right">
+                  <span class="font-bold text-lg ${a.open>5?'text-red-600':a.open>2?'text-orange-500':'text-slate-700'}">${a.open}</span>
+                  <div class="text-xs text-slate-400">open</div>
+                </div>
+              </div>`).join('')}
+        ` : `
+          <h3 class="font-semibold text-slate-800 mb-4 text-sm">My Summary</h3>
+          <div class="space-y-2">
+            ${[['Open',counts.open,'text-blue-600'],['In Progress',counts.in_progress,'text-yellow-600'],['Pending',counts.pending,'text-orange-500'],['Resolved',counts.resolved,'text-green-600'],['Total',counts.total,'text-slate-700']].map(([l,v,c]) => `
+              <div class="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
+                <span class="text-sm text-slate-600">${l}</span>
+                <span class="font-bold text-lg ${c}">${v}</span>
+              </div>`).join('')}
+          </div>`}
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100">
         <div class="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
-          <h2 class="font-semibold text-slate-900">Recent Tickets</h2>
-          <a href="#" data-page="tickets" class="text-sm text-indigo-600 hover:underline">View all →</a>
+          <h3 class="font-semibold text-slate-900 text-sm">Recent Activity</h3>
+          <a href="#" data-page="tickets" class="text-xs text-indigo-600 hover:underline">View all →</a>
         </div>
-        ${recent.length === 0
-          ? `<div class="p-10 text-center text-slate-400 text-sm">No tickets yet. <a href="#" data-page="new-ticket" class="text-indigo-500 hover:underline">Create your first ticket →</a></div>`
+        ${activity.length === 0
+          ? `<div class="p-10 text-center text-slate-400 text-sm">No activity yet. <a href="#" data-page="new-ticket" class="text-indigo-500 hover:underline">Submit a ticket →</a></div>`
           : `<div class="divide-y divide-slate-50">
-              ${recent.map(t => {
+              ${activity.map(t => {
                 const cat = cats.find(c => c.id === t.category);
                 return `
-                  <div class="px-5 py-4 hover:bg-slate-50 cursor-pointer transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="flex-1 min-w-0">
-                        <div class="font-medium text-slate-800 text-sm truncate">${t.title}</div>
-                        <div class="flex items-center gap-2 mt-1">
-                          <span class="font-mono text-xs text-slate-400">${t.number}</span>
-                          ${cat ? `<span class="text-xs text-slate-400">${cat.icon} ${cat.name}</span>` : ''}
-                          <span class="text-xs text-slate-400">${timeAgo(t.createdAt)}</span>
-                        </div>
-                      </div>
-                      <div class="flex gap-1.5 flex-shrink-0">
-                        ${badge(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}
-                        ${badge(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}
-                      </div>
+                <div class="px-5 py-3 hover:bg-slate-50 cursor-pointer flex items-center gap-3 transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
+                  ${avtr(t.requesterName)}
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-slate-800 truncate">${t.title}</div>
+                    <div class="flex items-center gap-2 mt-0.5">
+                      <span class="font-mono text-xs text-slate-400">${t.number}</span>
+                      ${cat ? `<span class="text-xs text-slate-400">${cat.icon} ${cat.name}</span>` : ''}
+                      <span class="text-xs text-slate-400">${ago(t.updatedAt)}</span>
                     </div>
-                  </div>`;
+                  </div>
+                  <div class="flex gap-1.5 flex-shrink-0">
+                    ${bdg(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}
+                    ${bdg(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}
+                  </div>
+                </div>`;
               }).join('')}
             </div>`}
       </div>
-    </div>`;
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const all  = ${JSON.stringify(getTickets())};
+      const mine = ${isAgent() ? 'all' : `all.filter(t=>t.requesterId==='${currentUser.id}')`};
+      const byStatus=[${Object.keys(STATUS_LABELS).map(s=>`mine.filter(t=>t.status==='${s}').length`).join(',')}];
+      const dayData=${JSON.stringify(dayData)};
+      const dayLabels=${JSON.stringify(dayLabels)};
+
+      const opts={responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}};
+      const ctxS=document.getElementById('dash-status');
+      const ctxT=document.getElementById('dash-trend');
+      if(ctxS) new Chart(ctxS,{type:'doughnut',data:{labels:${JSON.stringify(Object.values(STATUS_LABELS))},datasets:[{data:byStatus,backgroundColor:['#3b82f6','#eab308','#f97316','#22c55e','#94a3b8'],borderWidth:0}]},options:opts});
+      if(ctxT) new Chart(ctxT,{type:'line',data:{labels:dayLabels,datasets:[{label:'Tickets',data:dayData,borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,0.08)',fill:true,tension:0.4,pointRadius:3}]},options:{...opts,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+    })();
+  <\/script>`;
 }
 
 // ================================================================
-// TICKET LIST PAGE
+// TICKET LIST
 // ================================================================
-function renderTicketList(params = {}) {
-  const all = getTickets();
+function renderTicketList(params={}) {
+  const all  = getTickets();
   const cats = getCategories();
-  const fs = params.status || '', fp = params.priority || '', fq = params.search || '';
+  const fs=params.status||'', fp=params.priority||'', fq=params.search||'';
 
   let list = isAgent() ? all : all.filter(t => t.requesterId === currentUser.id);
-  if (fs) list = list.filter(t => t.status === fs);
+  if (fs) list = list.filter(t => t.status   === fs);
   if (fp) list = list.filter(t => t.priority === fp);
   if (fq) list = list.filter(t => t.title.toLowerCase().includes(fq.toLowerCase()) || t.number.toLowerCase().includes(fq.toLowerCase()));
-  list = [...list].sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt));
+  list = [...list].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   return `
-    <div class="p-6">
-      <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-slate-900">${isAgent() ? 'All Tickets' : 'My Tickets'}</h1>
-        <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
-          + New Ticket
-        </a>
+  <div class="p-6">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-slate-900">${isAgent() ? 'All Tickets' : 'My Tickets'}</h1>
+      <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">+ New Ticket</a>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-4 flex flex-wrap gap-3">
+      <input id="f-search" type="text" placeholder="Search by title or number…" value="${fq}"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-36 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+      <select id="f-status" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <option value="">All Statuses</option>
+        ${Object.entries(STATUS_LABELS).map(([v,l]) => `<option value="${v}" ${fs===v?'selected':''}>${l}</option>`).join('')}
+      </select>
+      <select id="f-priority" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <option value="">All Priorities</option>
+        ${['low','medium','high','critical'].map(p=>`<option value="${p}" ${fp===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+      </select>
+      <button id="btn-filter" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">Filter</button>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      ${list.length === 0
+        ? `<div class="p-12 text-center text-slate-400 text-sm">No tickets found.</div>`
+        : `<table class="w-full text-sm">
+            <thead class="bg-slate-50 border-b border-slate-100">
+              <tr>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ticket</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Priority</th>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">Category</th>
+                ${isAgent() ? '<th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Requester</th>' : ''}
+                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Created</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-50">
+              ${list.map(t => {
+                const cat = cats.find(c => c.id === t.category);
+                return `
+                <tr class="hover:bg-slate-50 cursor-pointer transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
+                  <td class="px-4 py-3"><div class="font-medium text-slate-800">${t.title}</div><div class="text-xs text-slate-400 font-mono">${t.number}</div></td>
+                  <td class="px-4 py-3">${bdg(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}</td>
+                  <td class="px-4 py-3">${bdg(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}</td>
+                  <td class="px-4 py-3 text-slate-600 hidden md:table-cell">${cat ? cat.icon+' '+cat.name : '—'}</td>
+                  ${isAgent() ? `<td class="px-4 py-3 text-slate-600 hidden lg:table-cell">${t.requesterName}</td>` : ''}
+                  <td class="px-4 py-3 text-slate-400 text-xs hidden lg:table-cell">${ago(t.createdAt)}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`}
+    </div>
+  </div>`;
+}
+
+// ================================================================
+// NEW TICKET
+// ================================================================
+function renderNewTicket() {
+  const cats   = getCategories();
+  const agents = getUsers().filter(u => u.role === 'agent' || u.role === 'admin');
+  return `
+  <div class="p-6 max-w-2xl">
+    <button onclick="render('tickets')" class="text-slate-500 hover:text-slate-700 text-sm mb-4">← Back</button>
+    <h1 class="text-2xl font-bold text-slate-900 mb-6">New Ticket</h1>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-4">
+      <form id="new-ticket-form" class="space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Title <span class="text-red-500">*</span></label>
+          <input id="nt-title" type="text" required placeholder="Brief description of the issue"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Description <span class="text-red-500">*</span></label>
+          <textarea id="nt-desc" required rows="5" placeholder="Describe the problem in detail…"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Category</label>
+            <select id="nt-cat" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              ${cats.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Priority</label>
+            <select id="nt-priority" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+              <option value="critical">🔴 Critical</option>
+            </select>
+          </div>
+        </div>
+        ${isAgent() ? `
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Assign To</label>
+          <select id="nt-assignee" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">Unassigned</option>
+            ${agents.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        <div class="flex gap-3 pt-2">
+          <button type="submit" class="bg-indigo-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">Submit Ticket</button>
+          <button type="button" onclick="render('tickets')" class="border border-slate-200 text-slate-600 px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-50">Cancel</button>
+        </div>
+      </form>
+    </div>
+    <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+      <div class="flex items-start gap-3">
+        <span class="text-xl">📧</span>
+        <div>
+          <div class="font-semibold text-blue-800 text-sm">Submit via Email</div>
+          <div class="text-blue-700 text-xs mt-1">
+            You can also email <strong>${CONFIG.supportEmail}</strong> to create a ticket.
+            To automate email-to-ticket creation, configure email forwarding via
+            <a href="https://zapier.com" target="_blank" class="underline">Zapier</a> or
+            <a href="https://make.com" target="_blank" class="underline">Make.com</a>.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ================================================================
+// TICKET DETAIL
+// ================================================================
+function renderTicketDetail(ticketId) {
+  const ticket   = getTickets().find(t => t.id === ticketId);
+  if (!ticket) return '<div class="p-6 text-center text-slate-400">Ticket not found.</div>';
+  const cats     = getCategories();
+  const allUsers = getAllUsers();
+  const cat      = cats.find(c => c.id === ticket.category);
+  const assignee = allUsers.find(u => u.id === ticket.assigneeId);
+  const agents   = getUsers().filter(u => u.role === 'agent' || u.role === 'admin');
+
+  return `
+  <div class="p-6">
+    <button onclick="render('tickets')" class="text-slate-500 hover:text-slate-700 text-sm mb-4">← Back to Tickets</button>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl">
+
+      <div class="lg:col-span-2 space-y-4">
+        <!-- Ticket Body -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+          <div class="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <div class="font-mono text-xs text-slate-400 mb-1">${ticket.number}</div>
+              <h1 class="text-xl font-bold text-slate-900">${ticket.title}</h1>
+              <div class="text-xs text-slate-400 mt-1">by ${ticket.requesterName} · ${ago(ticket.createdAt)}</div>
+            </div>
+            <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
+              ${bdg(STATUS_LABELS[ticket.status]||ticket.status, STATUS_COLORS[ticket.status]||'')}
+              ${bdg(ticket.priority.charAt(0).toUpperCase()+ticket.priority.slice(1), PRIORITY_COLORS[ticket.priority]||'')}
+            </div>
+          </div>
+          <div class="text-sm text-slate-600 whitespace-pre-wrap border-t border-slate-100 pt-4">${ticket.description}</div>
+        </div>
+
+        <!-- Comments -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100">
+          <div class="px-5 py-4 border-b border-slate-100">
+            <h2 class="font-semibold text-slate-900">Comments <span class="text-slate-400 font-normal text-sm">(${(ticket.comments||[]).length})</span></h2>
+          </div>
+          ${(ticket.comments||[]).length === 0
+            ? '<div class="px-5 py-8 text-center text-slate-400 text-sm">No comments yet.</div>'
+            : `<div class="divide-y divide-slate-50">
+                ${(ticket.comments||[]).map(c => `
+                  <div class="px-5 py-4 ${c.isInternal ? 'bg-amber-50' : ''}">
+                    <div class="flex items-center gap-2 mb-2">
+                      ${avtr(c.authorName)}
+                      <span class="font-medium text-sm text-slate-800">${c.authorName}</span>
+                      <span class="text-xs text-slate-400">${ago(c.createdAt)}</span>
+                      ${c.isInternal ? bdg('Internal Note','bg-amber-100 text-amber-700') : ''}
+                    </div>
+                    <div class="text-sm text-slate-700 whitespace-pre-wrap pl-9">${c.body}</div>
+                  </div>`).join('')}
+              </div>`}
+          <div class="px-5 py-4 border-t border-slate-100 bg-slate-50 rounded-b-xl">
+            <textarea id="comment-body" rows="3" placeholder="Write a comment…"
+              class="w-full border border-slate-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-3"></textarea>
+            <div class="flex gap-2">
+              <button id="btn-comment" data-id="${ticket.id}"
+                class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">Add Comment</button>
+              ${isAgent() ? `
+              <button id="btn-internal" data-id="${ticket.id}"
+                class="border border-amber-300 text-amber-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-50">Internal Note</button>` : ''}
+            </div>
+          </div>
+        </div>
+
+        <!-- History -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100">
+          <div class="px-5 py-4 border-b border-slate-100">
+            <h2 class="font-semibold text-slate-900">Activity History</h2>
+          </div>
+          <div class="px-5 py-3 space-y-2 max-h-48 overflow-y-auto">
+            ${(ticket.history||[]).slice().reverse().map(h => `
+              <div class="flex items-start gap-2 text-xs">
+                <span class="text-indigo-300 mt-0.5 flex-shrink-0">●</span>
+                <div class="text-slate-500"><span class="font-semibold text-slate-700">${h.by}</span> — ${h.action} <span class="text-slate-400">${ago(h.at)}</span></div>
+              </div>`).join('')}
+          </div>
+        </div>
       </div>
 
-      <!-- Filters -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-4 flex flex-wrap gap-3 items-center">
-        <input id="f-search" type="text" placeholder="Search tickets…" value="${fq}"
-          class="border border-slate-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-36 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-        <select id="f-status" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <option value="">All Statuses</option>
-          ${Object.entries(STATUS_LABELS).map(([v,l]) => `<option value="${v}" ${fs===v?'selected':''}>${l}</option>`).join('')}
-        </select>
-        <select id="f-priority" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <option value="">All Priorities</option>
-          ${['low','medium','high','critical'].map(p => `<option value="${p}" ${fp===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
-        </select>
-        <button id="btn-filter" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
-          Filter
-        </button>
-      </div>
+      <!-- Right Panel -->
+      <div class="space-y-4">
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+          <h3 class="font-semibold text-slate-900 mb-4">Details</h3>
+          <div class="space-y-3 text-sm">
+            <div class="flex justify-between"><span class="text-slate-500">Requester</span><span class="font-medium text-slate-800">${ticket.requesterName}</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Assigned To</span><span class="font-medium text-slate-800">${assignee ? assignee.name : '—'}</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Category</span><span>${cat ? cat.icon+' '+cat.name : '—'}</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Created</span><span class="text-xs text-slate-500">${fmt(ticket.createdAt)}</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Updated</span><span class="text-xs text-slate-500">${ago(ticket.updatedAt)}</span></div>
+            ${ticket.resolvedAt ? `<div class="flex justify-between"><span class="text-slate-500">Resolved</span><span class="text-xs text-slate-500">${fmt(ticket.resolvedAt)}</span></div>` : ''}
+            ${ticket.closedAt   ? `<div class="flex justify-between"><span class="text-slate-500">Closed</span><span class="text-xs text-slate-500">${fmt(ticket.closedAt)}</span></div>` : ''}
+            <div class="flex justify-between pt-2 border-t border-slate-100"><span class="text-slate-500">Resolution Time</span><span class="font-semibold">${resTime(ticket)}</span></div>
+          </div>
+        </div>
 
-      <!-- Table -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        ${list.length === 0
-          ? `<div class="p-12 text-center text-slate-400">No tickets found.</div>`
-          : `<table class="w-full text-sm">
+        ${isAgent() ? `
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+          <h3 class="font-semibold text-slate-900 mb-4">Update Ticket</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-500 mb-1">Status</label>
+              <select id="edit-status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                ${Object.entries(STATUS_LABELS).map(([v,l]) => `<option value="${v}" ${ticket.status===v?'selected':''}>${l}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-500 mb-1">Priority</label>
+              <select id="edit-priority" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                ${['low','medium','high','critical'].map(p => `<option value="${p}" ${ticket.priority===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-500 mb-1">Assign To</label>
+              <select id="edit-assignee" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">Unassigned</option>
+                ${agents.map(a => `<option value="${a.id}" ${ticket.assigneeId===a.id?'selected':''}>${a.name}</option>`).join('')}
+              </select>
+            </div>
+            <button id="btn-update" data-id="${ticket.id}"
+              class="w-full bg-indigo-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
+              Save Changes
+            </button>
+            ${emailReady() ? '' : `<p class="text-xs text-slate-400 text-center">⚠️ EmailJS not configured — closure emails disabled</p>`}
+          </div>
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ================================================================
+// REPORTS (Admin only)
+// ================================================================
+function renderReports(params={}) {
+  if (!isAdmin()) return '<div class="p-6 text-center text-slate-400">Access denied.</div>';
+
+  const now      = new Date();
+  const selMonth = parseInt(params.month || now.getMonth()+1);
+  const selYear  = parseInt(params.year  || now.getFullYear());
+  const MONTHS   = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const years    = Array.from({length:4},(_,i)=>now.getFullYear()-i);
+
+  const allTickets = getTickets();
+  const allUsers   = getAllUsers();
+  const cats       = getCategories();
+
+  const monthly = allTickets.filter(t => {
+    const d = new Date(t.createdAt);
+    return d.getFullYear() === selYear && d.getMonth()+1 === selMonth;
+  }).sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt));
+
+  const byStatus  = Object.keys(STATUS_LABELS).map(s => monthly.filter(t=>t.status===s).length);
+  const byPrio    = ['low','medium','high','critical'].map(p=>monthly.filter(t=>t.priority===p).length);
+
+  return `
+  <div class="p-6">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900">Monthly Reports</h1>
+        <p class="text-slate-500 text-sm">${allTickets.length} total tickets in system</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="rep-month" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          ${MONTHS.map((m,i) => `<option value="${i+1}" ${selMonth===i+1?'selected':''}>${m}</option>`).join('')}
+        </select>
+        <select id="rep-year" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          ${years.map(y => `<option value="${y}" ${selYear===y?'selected':''}>${y}</option>`).join('')}
+        </select>
+        <button id="btn-rep-filter" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">View</button>
+        <button id="btn-export-csv" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-700">⬇ Export CSV</button>
+      </div>
+    </div>
+
+    <!-- Monthly Stats -->
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+      ${Object.entries(STATUS_LABELS).map(([v,l]) => {
+        const cnt = monthly.filter(t=>t.status===v).length;
+        return `<div class="bg-white border border-slate-100 rounded-xl p-4 text-center shadow-sm">
+          <div class="text-2xl font-bold text-slate-900">${cnt}</div>
+          <div class="text-xs text-slate-500 mt-1">${l}</div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <h3 class="font-semibold text-slate-800 mb-3 text-sm">Status — ${MONTHS[selMonth-1]} ${selYear}</h3>
+        <canvas id="rep-status" height="200"></canvas>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <h3 class="font-semibold text-slate-800 mb-3 text-sm">Priority — ${MONTHS[selMonth-1]} ${selYear}</h3>
+        <canvas id="rep-priority" height="200"></canvas>
+      </div>
+    </div>
+
+    <!-- Full Ticket Table -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-100">
+        <h3 class="font-semibold text-slate-900">${MONTHS[selMonth-1]} ${selYear} — ${monthly.length} ticket${monthly.length!==1?'s':''}</h3>
+      </div>
+      ${monthly.length === 0
+        ? '<div class="p-10 text-center text-slate-400 text-sm">No tickets for this period.</div>'
+        : `<div class="overflow-x-auto">
+            <table class="w-full text-xs">
               <thead class="bg-slate-50 border-b border-slate-100">
                 <tr>
-                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ticket</th>
-                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
-                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Priority</th>
-                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">Category</th>
-                  ${isAgent() ? '<th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Requester</th>' : ''}
-                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Created</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Number</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Title</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Status</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Priority</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Category</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Requester</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Assigned To</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Created</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Last Updated</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Resolve Time</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Comments</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Last Action</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-50">
-                ${list.map(t => {
-                  const cat = cats.find(c => c.id === t.category);
+                ${monthly.map(t => {
+                  const cat      = cats.find(c => c.id === t.category);
+                  const assignee = allUsers.find(u => u.id === t.assigneeId);
+                  const lastH    = (t.history||[]).slice(-1)[0];
                   return `
-                    <tr class="hover:bg-slate-50 cursor-pointer transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
-                      <td class="px-4 py-3">
-                        <div class="font-medium text-slate-800">${t.title}</div>
-                        <div class="text-xs text-slate-400 font-mono">${t.number}</div>
-                      </td>
-                      <td class="px-4 py-3">${badge(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}</td>
-                      <td class="px-4 py-3">${badge(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}</td>
-                      <td class="px-4 py-3 text-slate-600 hidden md:table-cell">${cat ? cat.icon+' '+cat.name : '—'}</td>
-                      ${isAgent() ? `<td class="px-4 py-3 text-slate-600 hidden lg:table-cell">${t.requesterName}</td>` : ''}
-                      <td class="px-4 py-3 text-slate-400 hidden lg:table-cell">${timeAgo(t.createdAt)}</td>
-                    </tr>`;
+                  <tr class="hover:bg-slate-50 cursor-pointer" onclick="render('ticket',{ticketId:'${t.id}'})">
+                    <td class="px-4 py-3 font-mono text-slate-500">${t.number}</td>
+                    <td class="px-4 py-3 font-medium text-slate-800 max-w-xs"><div class="truncate max-w-xs">${t.title}</div></td>
+                    <td class="px-4 py-3">${bdg(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}</td>
+                    <td class="px-4 py-3">${bdg(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}</td>
+                    <td class="px-4 py-3 text-slate-600">${cat ? cat.name : '—'}</td>
+                    <td class="px-4 py-3 text-slate-600">${t.requesterName}</td>
+                    <td class="px-4 py-3 text-slate-600">${assignee ? assignee.name : '—'}</td>
+                    <td class="px-4 py-3 text-slate-500">${fmt(t.createdAt)}</td>
+                    <td class="px-4 py-3 text-slate-500">${fmt(t.updatedAt)}</td>
+                    <td class="px-4 py-3 text-slate-500">${resTime(t)}</td>
+                    <td class="px-4 py-3 text-center text-slate-600">${(t.comments||[]).length}</td>
+                    <td class="px-4 py-3 text-slate-500 max-w-xs"><div class="truncate max-w-xs">${lastH ? lastH.action : '—'}</div></td>
+                  </tr>`;
                 }).join('')}
               </tbody>
-            </table>`}
-      </div>
-    </div>`;
+            </table>
+          </div>`}
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const bs=${JSON.stringify(byStatus)}, bp=${JSON.stringify(byPrio)};
+      const opts={responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}};
+      const s=document.getElementById('rep-status'), p=document.getElementById('rep-priority');
+      if(s) new Chart(s,{type:'doughnut',data:{labels:${JSON.stringify(Object.values(STATUS_LABELS))},datasets:[{data:bs,backgroundColor:['#3b82f6','#eab308','#f97316','#22c55e','#94a3b8'],borderWidth:0}]},options:opts});
+      if(p) new Chart(p,{type:'bar',data:{labels:['Low','Medium','High','Critical'],datasets:[{data:bp,backgroundColor:['#94a3b8','#3b82f6','#f97316','#ef4444'],borderRadius:4,borderSkipped:false}]},options:{...opts,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+    })();
+  <\/script>`;
 }
 
 // ================================================================
-// NEW TICKET PAGE
-// ================================================================
-function renderNewTicket() {
-  const cats = getCategories();
-  const agents = getUsers().filter(u => (u.role === 'agent' || u.role === 'admin') && u.active);
-
-  return `
-    <div class="p-6 max-w-2xl">
-      <button onclick="render('tickets')" class="text-slate-500 hover:text-slate-700 text-sm mb-4">← Back to Tickets</button>
-      <h1 class="text-2xl font-bold text-slate-900 mb-6">New Ticket</h1>
-
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-        <form id="new-ticket-form" class="space-y-5">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Title <span class="text-red-500">*</span></label>
-            <input id="nt-title" type="text" required placeholder="Brief description of the issue"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Description <span class="text-red-500">*</span></label>
-            <textarea id="nt-desc" required rows="5" placeholder="Describe the problem in detail..."
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">Category</label>
-              <select id="nt-cat" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                ${cats.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">Priority</label>
-              <select id="nt-priority" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <option value="low">Low</option>
-                <option value="medium" selected>Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </div>
-          </div>
-          ${isAgent() ? `
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Assign To</label>
-            <select id="nt-assignee" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="">Unassigned</option>
-              ${agents.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
-            </select>
-          </div>` : ''}
-          <div class="flex gap-3 pt-2">
-            <button type="submit"
-              class="bg-indigo-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
-              Submit Ticket
-            </button>
-            <button type="button" onclick="render('tickets')"
-              class="border border-slate-200 text-slate-600 px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>`;
-}
-
-// ================================================================
-// TICKET DETAIL PAGE
-// ================================================================
-function renderTicketDetail(ticketId) {
-  const ticket = getTickets().find(t => t.id === ticketId);
-  if (!ticket) return '<div class="p-6 text-center text-slate-400">Ticket not found.</div>';
-
-  const cats    = getCategories();
-  const users   = getUsers();
-  const cat     = cats.find(c => c.id === ticket.category);
-  const assignee = users.find(u => u.id === ticket.assigneeId);
-  const agents  = users.filter(u => (u.role === 'agent' || u.role === 'admin') && u.active);
-
-  return `
-    <div class="p-6">
-      <button onclick="render('tickets')" class="text-slate-500 hover:text-slate-700 text-sm mb-4">← Back to Tickets</button>
-
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl">
-        <!-- Left: Ticket + Comments -->
-        <div class="lg:col-span-2 space-y-4">
-
-          <!-- Ticket -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-            <div class="flex items-start justify-between gap-4 mb-4">
-              <div>
-                <div class="text-xs font-mono text-slate-400 mb-1">${ticket.number}</div>
-                <h1 class="text-xl font-bold text-slate-900">${ticket.title}</h1>
-              </div>
-              <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
-                ${badge(STATUS_LABELS[ticket.status]||ticket.status, STATUS_COLORS[ticket.status]||'')}
-                ${badge(ticket.priority.charAt(0).toUpperCase()+ticket.priority.slice(1), PRIORITY_COLORS[ticket.priority]||'')}
-              </div>
-            </div>
-            <div class="text-sm text-slate-600 whitespace-pre-wrap border-t border-slate-100 pt-4">${ticket.description}</div>
-          </div>
-
-          <!-- Comments -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100">
-            <div class="px-5 py-4 border-b border-slate-100">
-              <h2 class="font-semibold text-slate-900">Comments <span class="text-slate-400 font-normal">(${(ticket.comments||[]).length})</span></h2>
-            </div>
-            <div class="divide-y divide-slate-50">
-              ${(ticket.comments||[]).length === 0
-                ? '<div class="px-5 py-8 text-center text-slate-400 text-sm">No comments yet.</div>'
-                : (ticket.comments||[]).map(c => `
-                  <div class="px-5 py-4 ${c.isInternal ? 'bg-amber-50' : ''}">
-                    <div class="flex items-center gap-2 mb-2">
-                      ${avatar(c.authorName)}
-                      <span class="font-medium text-sm text-slate-800">${c.authorName}</span>
-                      <span class="text-xs text-slate-400">${timeAgo(c.createdAt)}</span>
-                      ${c.isInternal ? badge('Internal Note','bg-amber-100 text-amber-700') : ''}
-                    </div>
-                    <div class="text-sm text-slate-600 whitespace-pre-wrap pl-9">${c.body}</div>
-                  </div>`).join('')}
-            </div>
-            <!-- Add Comment -->
-            <div class="px-5 py-4 border-t border-slate-100 bg-slate-50 rounded-b-xl">
-              <textarea id="comment-body" rows="3" placeholder="Write a comment…"
-                class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-3 bg-white"></textarea>
-              <div class="flex gap-2">
-                <button id="btn-comment" data-id="${ticket.id}"
-                  class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
-                  Add Comment
-                </button>
-                ${isAgent() ? `
-                <button id="btn-internal" data-id="${ticket.id}"
-                  class="border border-amber-300 text-amber-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors">
-                  Internal Note
-                </button>` : ''}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Details + Actions -->
-        <div class="space-y-4">
-          <!-- Details -->
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <h3 class="font-semibold text-slate-900 mb-4">Details</h3>
-            <div class="space-y-3 text-sm">
-              <div class="flex justify-between items-center">
-                <span class="text-slate-500">Requester</span>
-                <span class="font-medium text-slate-800">${ticket.requesterName}</span>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-slate-500">Assigned To</span>
-                <span class="font-medium text-slate-800">${assignee ? assignee.name : '—'}</span>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-slate-500">Category</span>
-                <span class="font-medium text-slate-800">${cat ? cat.icon+' '+cat.name : '—'}</span>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-slate-500">Created</span>
-                <span class="text-slate-600 text-xs">${formatDate(ticket.createdAt)}</span>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-slate-500">Updated</span>
-                <span class="text-slate-600 text-xs">${timeAgo(ticket.updatedAt)}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Update (agents/admins only) -->
-          ${isAgent() ? `
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <h3 class="font-semibold text-slate-900 mb-4">Update Ticket</h3>
-            <div class="space-y-3">
-              <div>
-                <label class="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                <select id="edit-status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  ${Object.entries(STATUS_LABELS).map(([v,l]) => `<option value="${v}" ${ticket.status===v?'selected':''}>${l}</option>`).join('')}
-                </select>
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-slate-500 mb-1">Priority</label>
-                <select id="edit-priority" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  ${['low','medium','high','critical'].map(p => `<option value="${p}" ${ticket.priority===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
-                </select>
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-slate-500 mb-1">Assign To</label>
-                <select id="edit-assignee" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  <option value="">Unassigned</option>
-                  ${agents.map(a => `<option value="${a.id}" ${ticket.assigneeId===a.id?'selected':''}>${a.name}</option>`).join('')}
-                </select>
-              </div>
-              <button id="btn-update" data-id="${ticket.id}"
-                class="w-full bg-indigo-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
-                Save Changes
-              </button>
-            </div>
-          </div>` : ''}
-        </div>
-      </div>
-    </div>`;
-}
-
-// ================================================================
-// REPORTS PAGE
-// ================================================================
-function renderReports() {
-  const tickets = getTickets();
-  return `
-    <div class="p-6">
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold text-slate-900">Reports</h1>
-        <p class="text-slate-500 text-sm mt-1">${tickets.length} total tickets</p>
-      </div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-          <h3 class="font-semibold text-slate-800 mb-4">Tickets by Status</h3>
-          <canvas id="chart-status" height="240"></canvas>
-        </div>
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-          <h3 class="font-semibold text-slate-800 mb-4">Tickets by Priority</h3>
-          <canvas id="chart-priority" height="240"></canvas>
-        </div>
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-          <h3 class="font-semibold text-slate-800 mb-4">Last 7 Days</h3>
-          <canvas id="chart-days" height="240"></canvas>
-        </div>
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-          <h3 class="font-semibold text-slate-800 mb-4">By Category</h3>
-          <canvas id="chart-cat" height="240"></canvas>
-        </div>
-      </div>
-
-      <!-- Summary -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100"><h3 class="font-semibold text-slate-900">Status Summary</h3></div>
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50">
-            <tr>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Count</th>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Share</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-50">
-            ${Object.entries(STATUS_LABELS).map(([v,l]) => {
-              const count = tickets.filter(t => t.status === v).length;
-              const pct = tickets.length ? Math.round(count/tickets.length*100) : 0;
-              return `<tr>
-                <td class="px-5 py-3">${badge(l, STATUS_COLORS[v]||'')}</td>
-                <td class="px-5 py-3 font-semibold text-slate-800">${count}</td>
-                <td class="px-5 py-3">
-                  <div class="flex items-center gap-2">
-                    <div class="w-20 bg-slate-100 rounded-full h-1.5">
-                      <div class="bg-indigo-500 h-1.5 rounded-full" style="width:${pct}%"></div>
-                    </div>
-                    <span class="text-xs text-slate-500">${pct}%</span>
-                  </div>
-                </td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-}
-
-function initCharts() {
-  const tickets   = getTickets();
-  const cats      = getCategories();
-  const byStatus  = Object.keys(STATUS_LABELS).map(s => tickets.filter(t => t.status === s).length);
-  const byPrio    = ['low','medium','high','critical'].map(p => tickets.filter(t => t.priority === p).length);
-  const byCat     = cats.map(c => tickets.filter(t => t.category === c.id).length);
-
-  const days = Array.from({length:7}, (_,i) => {
-    const d = new Date(); d.setDate(d.getDate()-(6-i));
-    return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
-  });
-  const perDay = Array.from({length:7}, (_,i) => {
-    const d = new Date(); d.setDate(d.getDate()-(6-i));
-    return tickets.filter(t => new Date(t.createdAt).toDateString() === d.toDateString()).length;
-  });
-
-  const opts = { responsive:true, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } } };
-
-  new Chart(document.getElementById('chart-status'), {
-    type:'doughnut',
-    data:{ labels:Object.values(STATUS_LABELS), datasets:[{ data:byStatus, backgroundColor:['#3b82f6','#eab308','#f97316','#22c55e','#94a3b8'], borderWidth:0 }] },
-    options: opts,
-  });
-  new Chart(document.getElementById('chart-priority'), {
-    type:'bar',
-    data:{ labels:['Low','Medium','High','Critical'], datasets:[{ data:byPrio, backgroundColor:['#94a3b8','#3b82f6','#f97316','#ef4444'], borderRadius:4, borderSkipped:false }] },
-    options:{ ...opts, plugins:{ legend:{display:false} }, scales:{ y:{ beginAtZero:true, ticks:{stepSize:1} } } },
-  });
-  new Chart(document.getElementById('chart-days'), {
-    type:'line',
-    data:{ labels:days, datasets:[{ label:'Tickets', data:perDay, borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,0.08)', fill:true, tension:0.4, pointRadius:3 }] },
-    options:{ ...opts, plugins:{ legend:{display:false} }, scales:{ y:{ beginAtZero:true, ticks:{stepSize:1} } } },
-  });
-  new Chart(document.getElementById('chart-cat'), {
-    type:'doughnut',
-    data:{ labels:cats.map(c=>c.name), datasets:[{ data:byCat, backgroundColor:cats.map(c=>c.color), borderWidth:0 }] },
-    options: opts,
-  });
-}
-
-// ================================================================
-// USERS PAGE (admin only)
+// USERS (Admin only)
 // ================================================================
 function renderUsers() {
   if (!isAdmin()) return '<div class="p-6 text-center text-slate-400">Access denied.</div>';
-  const users = getUsers();
+  const users = Store.get('users',[]);
 
   return `
-    <div class="p-6">
-      <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-slate-900">Users</h1>
-        <button id="btn-show-add"
-          class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">
-          + Add User
-        </button>
-      </div>
+  <div class="p-6">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-slate-900">User Management</h1>
+      <button id="btn-show-add" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">+ Add User</button>
+    </div>
 
-      <!-- Add User Form -->
-      <div id="add-user-form" class="hidden bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
-        <h2 class="font-semibold text-slate-900 mb-4">Add New User</h2>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
-            <input id="nu-name" type="text" placeholder="John Doe"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
-            <input id="nu-email" type="email" placeholder="john@company.com"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
-            <input id="nu-pass" type="text" placeholder="Password123!"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Department</label>
-            <input id="nu-dept" type="text" placeholder="IT, Finance, HR…"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Role</label>
-            <select id="nu-role" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="user">End User</option>
-              <option value="agent">Agent</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-        </div>
-        <div class="flex gap-3 mt-4">
-          <button id="btn-save-user"
-            class="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-700">
-            Save User
-          </button>
-          <button id="btn-cancel-user"
-            class="border border-slate-200 text-slate-600 px-5 py-2.5 rounded-lg text-sm hover:bg-slate-50">
-            Cancel
-          </button>
-        </div>
+    <!-- Add User Form -->
+    <div id="add-user-form" class="hidden bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
+      <h2 class="font-semibold text-slate-900 mb-4">Add New User</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div><label class="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+          <input id="nu-name" type="text" placeholder="John Doe" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+        <div><label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
+          <input id="nu-email" type="email" placeholder="john@company.com" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+        <div><label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+          <input id="nu-pass" type="text" placeholder="Password123!" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+        <div><label class="block text-sm font-medium text-slate-700 mb-1">Department</label>
+          <input id="nu-dept" type="text" placeholder="IT, Finance, HR…" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+        <div><label class="block text-sm font-medium text-slate-700 mb-1">Role</label>
+          <select id="nu-role" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="user">End User</option>
+            <option value="agent">Agent</option>
+            <option value="admin">Admin</option>
+          </select></div>
       </div>
+      <div class="flex gap-3 mt-4">
+        <button id="btn-save-user" class="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-700">Save User</button>
+        <button id="btn-cancel-user" class="border border-slate-200 text-slate-600 px-5 py-2.5 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+      </div>
+    </div>
 
-      <!-- Users Table -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50 border-b border-slate-100">
-            <tr>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Name</th>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Email</th>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Department</th>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Role</th>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
-              <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-50">
-            ${users.map(u => `
-              <tr class="hover:bg-slate-50">
-                <td class="px-5 py-3">
-                  <div class="flex items-center gap-2">
-                    ${avatar(u.name)}
-                    <span class="font-medium text-slate-800">${u.name}</span>
-                  </div>
-                </td>
-                <td class="px-5 py-3 text-slate-600">${u.email}</td>
-                <td class="px-5 py-3 text-slate-600">${u.dept || '—'}</td>
-                <td class="px-5 py-3">
-                  <select onchange="changeUserRole('${u.id}',this.value)"
-                    class="border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <!-- Users Table -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 border-b border-slate-100">
+          <tr>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">User</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Dept</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Role</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-50">
+          ${users.map(u => `
+          <tr class="${u.deleted ? 'opacity-40' : ''}">
+            <td class="px-5 py-3">
+              <div class="flex items-center gap-2">
+                ${avtr(u.name)}
+                <div>
+                  <div class="font-medium text-slate-800">${u.name}</div>
+                  <div class="text-xs text-slate-400">${u.email}</div>
+                </div>
+              </div>
+            </td>
+            <td class="px-5 py-3 text-slate-600">${u.dept||'—'}</td>
+            <td class="px-5 py-3">
+              ${u.deleted
+                ? `<span class="text-xs text-slate-400">${u.role}</span>`
+                : `<select onchange="changeUserRole('${u.id}',this.value)"
+                    class="border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400">
                     <option value="user"  ${u.role==='user'?'selected':''}>User</option>
                     <option value="agent" ${u.role==='agent'?'selected':''}>Agent</option>
                     <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
-                  </select>
-                </td>
-                <td class="px-5 py-3">
-                  ${u.active
-                    ? badge('Active','bg-green-100 text-green-700')
-                    : badge('Inactive','bg-slate-100 text-slate-500')}
-                </td>
-                <td class="px-5 py-3">
-                  <button onclick="toggleUserActive('${u.id}')"
-                    class="text-xs border border-slate-200 px-2 py-1 rounded hover:bg-slate-50 text-slate-500 hover:text-slate-800 transition-colors">
-                    ${u.active ? 'Deactivate' : 'Activate'}
-                  </button>
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
+                  </select>`}
+            </td>
+            <td class="px-5 py-3">
+              ${u.deleted
+                ? bdg('Deleted','bg-red-100 text-red-400')
+                : u.active
+                  ? bdg('Active','bg-green-100 text-green-700')
+                  : bdg('Inactive','bg-slate-100 text-slate-500')}
+            </td>
+            <td class="px-5 py-3">
+              ${u.deleted
+                ? `<span class="text-xs text-slate-400 italic">History retained</span>`
+                : `<div class="flex gap-2">
+                    <button onclick="toggleUserActive('${u.id}')"
+                      class="text-xs border border-slate-200 px-2.5 py-1 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">
+                      ${u.active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    ${u.id !== currentUser.id ? `
+                    <button onclick="confirmDeleteUser('${u.id}','${u.name}')"
+                      class="text-xs border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50 text-red-500 transition-colors">
+                      Delete
+                    </button>` : '<span class="text-xs text-slate-400">(you)</span>'}
+                  </div>`}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-slate-400 mt-3 px-1">
+      * Deleted users cannot log in but their ticket history is fully preserved in the system.
+    </p>
+  </div>`;
 }
 
-// ================================================================
-// GLOBAL INLINE-ONCLICK FUNCTIONS
-// ================================================================
+// User management — called from inline onclick
 function changeUserRole(userId, role) {
-  const users = getUsers();
+  const users = Store.get('users',[]);
   const u = users.find(u => u.id === userId);
-  if (u) { u.role = role; Storage.set('users', users); }
+  if (u) { u.role = role; Store.set('users', users); showToast('Role updated'); }
 }
 
 function toggleUserActive(userId) {
-  const users = getUsers();
+  const users = Store.get('users',[]);
   const u = users.find(u => u.id === userId);
-  if (u) { u.active = !u.active; Storage.set('users', users); render('users'); }
+  if (u) { u.active = !u.active; Store.set('users', users); render('users'); showToast(u.active ? 'User activated' : 'User deactivated'); }
+}
+
+function confirmDeleteUser(userId, name) {
+  if (!confirm(`Delete "${name}"?\n\nThey will no longer be able to log in, but all their tickets and history will remain in the system.`)) return;
+  const users = Store.get('users',[]);
+  const u = users.find(u => u.id === userId);
+  if (u) {
+    u.deleted = true;
+    u.active  = false;
+    Store.set('users', users);
+    render('users');
+    showToast(`${name} deleted — history retained`, 'warning');
+  }
 }
 
 // ================================================================
@@ -901,12 +1110,16 @@ function toggleUserActive(userId) {
 // ================================================================
 function bindNav() {
   document.querySelectorAll('[data-page]').forEach(el => {
-    el.addEventListener('click', e => { e.preventDefault(); render(el.dataset.page); });
+    el.addEventListener('click', e => {
+      e.preventDefault();
+      render(el.dataset.page, el.dataset.priority ? { priority: el.dataset.priority } : {});
+    });
   });
   document.getElementById('btn-logout')?.addEventListener('click', logout);
 }
 
 function bindPageEvents(page, params) {
+
   if (page === 'tickets') {
     document.getElementById('btn-filter')?.addEventListener('click', () => {
       render('tickets', {
@@ -915,50 +1128,88 @@ function bindPageEvents(page, params) {
         priority: document.getElementById('f-priority').value,
       });
     });
-    document.getElementById('f-search')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') document.getElementById('btn-filter').click();
-    });
+    document.getElementById('f-search')?.addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('btn-filter').click(); });
   }
 
   if (page === 'new-ticket') {
     document.getElementById('new-ticket-form')?.addEventListener('submit', e => {
       e.preventDefault();
-      const ticket = createTicket({
-        title:      document.getElementById('nt-title').value.trim(),
-        description:document.getElementById('nt-desc').value.trim(),
-        category:   document.getElementById('nt-cat').value,
-        priority:   document.getElementById('nt-priority').value,
-        assigneeId: document.getElementById('nt-assignee')?.value || null,
+      const t = createTicket({
+        title:       document.getElementById('nt-title').value.trim(),
+        description: document.getElementById('nt-desc').value.trim(),
+        category:    document.getElementById('nt-cat').value,
+        priority:    document.getElementById('nt-priority').value,
+        assigneeId:  document.getElementById('nt-assignee')?.value || null,
       });
-      render('ticket', { ticketId: ticket.id });
+      showToast(`Ticket ${t.number} created successfully`);
+      render('ticket', { ticketId: t.id });
     });
   }
 
   if (page === 'ticket') {
     document.getElementById('btn-comment')?.addEventListener('click', () => {
       const body = document.getElementById('comment-body').value.trim();
-      if (!body) return;
+      if (!body) { showToast('Comment cannot be empty','error'); return; }
       addComment(params.ticketId, body, false);
       render('ticket', { ticketId: params.ticketId });
     });
     document.getElementById('btn-internal')?.addEventListener('click', () => {
       const body = document.getElementById('comment-body').value.trim();
-      if (!body) return;
+      if (!body) { showToast('Note cannot be empty','error'); return; }
       addComment(params.ticketId, body, true);
       render('ticket', { ticketId: params.ticketId });
     });
-    document.getElementById('btn-update')?.addEventListener('click', () => {
-      updateTicket(params.ticketId, {
+    document.getElementById('btn-update')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-update');
+      btn.textContent = 'Saving…'; btn.disabled = true;
+      await updateTicket(params.ticketId, {
         status:     document.getElementById('edit-status').value,
         priority:   document.getElementById('edit-priority').value,
         assigneeId: document.getElementById('edit-assignee').value || null,
       });
       render('ticket', { ticketId: params.ticketId });
+      showToast('Ticket updated');
     });
   }
 
   if (page === 'reports') {
-    setTimeout(initCharts, 50);
+    const now      = new Date();
+    const selMonth = parseInt(params.month || now.getMonth()+1);
+    const selYear  = parseInt(params.year  || now.getFullYear());
+
+    document.getElementById('btn-rep-filter')?.addEventListener('click', () => {
+      render('reports', {
+        month: document.getElementById('rep-month').value,
+        year:  document.getElementById('rep-year').value,
+      });
+    });
+    document.getElementById('btn-export-csv')?.addEventListener('click', () => {
+      const m = parseInt(document.getElementById('rep-month').value);
+      const y = parseInt(document.getElementById('rep-year').value);
+      const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const cats   = getCategories();
+      const allU   = getAllUsers();
+      const rows   = getTickets().filter(t => {
+        const d = new Date(t.createdAt);
+        return d.getFullYear()===y && d.getMonth()+1===m;
+      }).map(t => {
+        const cat      = cats.find(c => c.id === t.category);
+        const assignee = allU.find(u => u.id === t.assigneeId);
+        const lastH    = (t.history||[]).slice(-1)[0];
+        return [
+          t.number, t.title,
+          STATUS_LABELS[t.status]||t.status, t.priority,
+          cat?.name||'', t.requesterName, t.requesterEmail||'',
+          assignee?.name||'Unassigned',
+          t.createdAt, t.updatedAt, t.resolvedAt||'', t.closedAt||'',
+          resTime(t), (t.comments||[]).length,
+          lastH ? `${lastH.action} by ${lastH.by} at ${lastH.at}` : ''
+        ];
+      });
+      const headers = ['Ticket No','Title','Status','Priority','Category','Requester','Requester Email','Assigned To','Created At','Updated At','Resolved At','Closed At','Resolution Time','Comment Count','Last Action'];
+      exportCSV([headers,...rows], `tickets-${MONTHS[m-1]}-${y}.csv`);
+      showToast('CSV exported');
+    });
   }
 
   if (page === 'users') {
@@ -970,25 +1221,27 @@ function bindPageEvents(page, params) {
     });
     document.getElementById('btn-save-user')?.addEventListener('click', () => {
       const name  = document.getElementById('nu-name').value.trim();
-      const email = document.getElementById('nu-email').value.trim();
+      const email = document.getElementById('nu-email').value.trim().toLowerCase();
       const pass  = document.getElementById('nu-pass').value.trim();
       const dept  = document.getElementById('nu-dept').value.trim();
       const role  = document.getElementById('nu-role').value;
-      if (!name || !email || !pass) { alert('Name, email and password are required.'); return; }
-      const users = getUsers();
-      if (users.find(u => u.email === email)) { alert('That email already exists.'); return; }
-      users.push({ id: Date.now().toString(), name, email, password: pass, dept, role, active: true });
-      Storage.set('users', users);
+      if (!name || !email || !pass) { showToast('Name, email and password are required','error'); return; }
+      const users = Store.get('users',[]);
+      if (users.find(u => u.email === email)) { showToast('Email already exists','error'); return; }
+      users.push({ id: Date.now().toString(), name, email, password: pass, dept, role, active: true, deleted: false });
+      Store.set('users', users);
+      showToast('User added successfully');
       render('users');
     });
   }
 }
 
 // ================================================================
-// START APP
+// START
 // ================================================================
 initStorage();
 restoreSession() ? render('dashboard') : render('login');
+
 </script>
 </body>
 </html>
