@@ -43,10 +43,32 @@
     0%   { transform:translate(-50%,-50%) scale(0); opacity:0.9; }
     100% { transform:translate(-50%,-50%) scale(1); opacity:0; }
   }
+
+  /* Custom cursor ring */
+  #cursor-ring {
+    position:fixed; pointer-events:none; z-index:1002; border-radius:50%;
+    width:26px; height:26px; border:1.5px solid rgba(99,102,241,0.7);
+    transform:translate(-50%,-50%);
+    transition:width 0.12s ease, height 0.12s ease;
+  }
+
+  /* Notification panel */
+  #notif-panel { animation:notifSlide 0.15s ease-out; }
+  @keyframes notifSlide {
+    from { opacity:0; transform:translateY(6px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  /* SLA badge pulse for overdue */
+  .sla-overdue { animation: pulse-red 1.8s infinite; }
+  @keyframes pulse-red {
+    0%,100% { opacity:1; } 50% { opacity:0.6; }
+  }
 </style>
 </head>
 <body class="bg-gray-50 font-sans dm-main">
 <canvas id="mouse-canvas"></canvas>
+<div id="cursor-ring"></div>
 <div id="root"></div>
 <script>
 
@@ -296,6 +318,43 @@ const PRIORITY_COLORS= { low:'bg-slate-100 text-slate-600', medium:'bg-blue-100 
 const bdg  = (lbl,cls) => `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${lbl}</span>`;
 const avtr = (name,sz='w-7 h-7') => `<div class="${sz} rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs flex-shrink-0">${(name||'?').charAt(0).toUpperCase()}</div>`;
 
+// SLA helpers
+const SLA_HOURS = { critical:4, high:24, medium:48, low:120 };
+
+function getSLAStatus(t) {
+  if (!t || ['resolved','closed'].includes(t.status)) return null;
+  const h = (Date.now() - new Date(t.createdAt)) / 3600000;
+  const sla = SLA_HOURS[t.priority] || 48;
+  if (h > sla) return 'overdue';
+  if (h > sla * 0.75) return 'due_soon';
+  return 'ok';
+}
+
+function slaAge(t) {
+  const h   = Math.round((Date.now() - new Date(t.createdAt)) / 3600000);
+  const sla = SLA_HOURS[t.priority] || 48;
+  const over = h - sla;
+  if (over > 0) return `+${over}h`;
+  if (h < 1)   return '<1h';
+  if (h < 24)  return `${h}h`;
+  return `${Math.floor(h/24)}d`;
+}
+
+function statusPill(count, label, cls) {
+  return `<button onclick="render('tickets',{status:'${label.toLowerCase().replace(' ','_')}'})"
+    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${cls} cursor-pointer hover:opacity-80 transition-opacity">
+    <strong>${String(count).padStart(2,'0')}</strong>${label}
+  </button>`;
+}
+
+function miniStat(label, val, color, status) {
+  return `<div class="bg-white border border-slate-100 rounded-xl p-3 text-center shadow-sm hover:shadow-md transition-all cursor-pointer"
+    ${status ? `onclick="render('tickets',{status:'${status}'})"` : ''}>
+    <div class="text-2xl font-bold ${color}">${val}</div>
+    <div class="text-xs text-slate-500 mt-0.5 leading-tight">${label}</div>
+  </div>`;
+}
+
 function exportCSV(rows, filename) {
   const csv = rows.map(r => r.map(c => `"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\n');
   const a   = document.createElement('a');
@@ -403,6 +462,13 @@ function renderShell(content) {
             <div class="text-white text-xs font-medium truncate">${currentUser.name}</div>
             <div class="text-slate-400 text-xs capitalize">${currentUser.role}</div>
           </div>
+          ${(()=>{
+            const n24 = Store.get('activityLogs',[]).filter(l=>(Date.now()-new Date(l.at))<86400000).length;
+            return `<button id="btn-notif" title="Notifications" class="text-slate-400 hover:text-white text-sm mr-1 relative">
+              🔔
+              ${n24>0?`<span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full text-white flex items-center justify-center font-bold" style="font-size:8px">${n24>9?'9+':n24}</span>`:''}
+            </button>`;
+          })()}
           <button id="btn-dm" title="Toggle dark mode" class="text-slate-400 hover:text-yellow-300 text-sm mr-1">🌙</button>
           <button id="btn-logout" title="Sign Out" class="text-slate-400 hover:text-white text-base">⏏</button>
         </div>
@@ -498,193 +564,267 @@ function bindLogin() {
 // DASHBOARD
 // ================================================================
 function renderDashboard() {
-  const all  = getTickets();
-  const mine = isAgent() ? all : all.filter(t => t.requesterId === currentUser.id);
-  const cats = getCategories();
+  const all      = getTickets();
+  const mine     = isAgent() ? all : all.filter(t => t.requesterId === currentUser.id);
+  const cats     = getCategories();
+  const allUsers = getAllUsers();
+  const active   = mine.filter(t => !['resolved','closed'].includes(t.status));
 
-  const counts = {
-    total:       mine.length,
-    open:        mine.filter(t => t.status === 'open').length,
-    in_progress: mine.filter(t => t.status === 'in_progress').length,
-    pending:     mine.filter(t => t.status === 'pending').length,
-    resolved:    mine.filter(t => t.status === 'resolved').length,
-    closed:      mine.filter(t => t.status === 'closed').length,
-  };
-  const critical = mine.filter(t => t.priority === 'critical' && ['open','in_progress','pending'].includes(t.status)).length;
+  const cOpen   = mine.filter(t => t.status === 'open').length;
+  const cInProg = mine.filter(t => t.status === 'in_progress').length;
+  const cPend   = mine.filter(t => t.status === 'pending').length;
+  const cRes    = mine.filter(t => t.status === 'resolved').length;
+  const cClosed = mine.filter(t => t.status === 'closed').length;
+
+  const overdue  = active.filter(t => getSLAStatus(t) === 'overdue');
+  const dueSoon  = active.filter(t => getSLAStatus(t) === 'due_soon');
+  const critical = active.filter(t => t.priority === 'critical').length;
+  const high     = active.filter(t => t.priority === 'high').length;
+
+  // Urgent tickets (critical + overdue), deduped, sorted by priority
+  const urgentMap = {};
+  [...overdue, ...active.filter(t => t.priority === 'critical')].forEach(t => { urgentMap[t.id] = t; });
+  const urgentList = Object.values(urgentMap)
+    .sort((a,b) => { const p={critical:4,high:3,medium:2,low:1}; return (p[b.priority]||0)-(p[a.priority]||0); })
+    .slice(0, 8);
 
   // Category breakdown (open tickets only)
+  // Category breakdown
   const catBreakdown = cats.map(c => ({
-    ...c,
-    count: mine.filter(t => t.category === c.id && !['resolved','closed'].includes(t.status)).length,
-  })).filter(c => c.count > 0).sort((a,b) => b.count - a.count);
+    ...c, count: mine.filter(t => t.category===c.id && !['resolved','closed'].includes(t.status)).length,
+  })).filter(c=>c.count>0).sort((a,b)=>b.count-a.count);
 
   // Agent workload
-  const agentLoad = isAgent()
-    ? getUsers().filter(u => u.role === 'agent' || u.role === 'admin').map(a => ({
-        ...a,
-        open: all.filter(t => t.assigneeId === a.id && ['open','in_progress','pending'].includes(t.status)).length,
-      })).sort((a,b) => b.open - a.open)
-    : [];
+  const agentLoad = getUsers().filter(u=>u.role==='agent'||u.role==='admin').map(a=>({
+    ...a, open: all.filter(t=>t.assigneeId===a.id && ['open','in_progress','pending'].includes(t.status)).length,
+  })).sort((a,b)=>b.open-a.open);
+  const maxLoad = Math.max(...agentLoad.map(a=>a.open), 1);
 
-  // Last 7 days trend
-  const days    = Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); return d; });
+  // 7-day trend
+  const days      = Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); return d; });
   const dayLabels = days.map(d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
   const dayData   = days.map(d=>mine.filter(t=>new Date(t.createdAt).toDateString()===d.toDateString()).length);
 
-  // Recent activity
-  const activity = [...mine].sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt)).slice(0,6);
+  // Recent activity logs
+  const recentLogs = Store.get('activityLogs',[]).slice(-12).reverse();
+
+  const byStatus = Object.keys(STATUS_LABELS).map(s=>mine.filter(t=>t.status===s).length);
 
   return `
-  <div class="p-4 md:p-6">
-    <div class="flex items-center justify-between mb-6 gap-3">
-      <div class="min-w-0">
+  <div class="p-4 md:p-6 min-h-full">
+
+    <!-- Header row -->
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div>
         <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p class="text-slate-500 text-xs md:text-sm mt-0.5 truncate">Welcome back, <strong>${currentUser.name}</strong> &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</p>
+        <p class="text-slate-500 text-xs mt-0.5">${new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
-      <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-3 md:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors flex-shrink-0">+ New Ticket</a>
+      <a href="#" data-page="new-ticket"
+        class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition-all flex-shrink-0 shadow-sm">
+        + New Ticket
+      </a>
     </div>
 
-    <!-- Stat Cards -->
-    <div class="grid grid-cols-3 lg:grid-cols-6 gap-2 md:gap-3 mb-5">
-      ${[
-        { label:'Total',       val:counts.total,       bg:'bg-white',          num:'text-slate-900',   border:'border-slate-100', status:''           },
-        { label:'Open',        val:counts.open,        bg:'bg-blue-50',        num:'text-blue-700',    border:'border-blue-100',  status:'open'        },
-        { label:'In Progress', val:counts.in_progress, bg:'bg-yellow-50',      num:'text-yellow-700',  border:'border-yellow-100',status:'in_progress' },
-        { label:'Pending',     val:counts.pending,     bg:'bg-orange-50',      num:'text-orange-700',  border:'border-orange-100',status:'pending'     },
-        { label:'Resolved',    val:counts.resolved,    bg:'bg-green-50',       num:'text-green-700',   border:'border-green-100', status:'resolved'    },
-        { label:'Closed',      val:counts.closed,      bg:'bg-slate-100',      num:'text-slate-600',   border:'border-slate-200', status:'closed'      },
-      ].map(s => `
-        <div class="${s.bg} border ${s.border} rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow ${s.status?'cursor-pointer':''}"
-          ${s.status?`onclick="render('tickets',{status:'${s.status}'})"`:''}">
-          <div class="text-xs font-medium text-slate-500 mb-2">${s.label}</div>
-          <div class="text-3xl font-bold ${s.num}">${s.val}</div>
-        </div>`).join('')}
+    <!-- ═══ ATERA-STYLE STATUS BAR ═══ -->
+    <div class="bg-white border border-slate-100 rounded-xl px-4 py-3 mb-4 shadow-sm overflow-x-auto">
+      <div class="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-max sm:min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Ticket status</span>
+          ${statusPill(cOpen,   'Open',        'bg-blue-100 text-blue-700')}
+          ${statusPill(cInProg, 'In Progress', 'bg-yellow-100 text-yellow-700')}
+          ${statusPill(cPend,   'Pending',     'bg-orange-100 text-orange-700')}
+          ${statusPill(dueSoon.length, 'Due Soon',  'bg-amber-100 text-amber-700')}
+          ${statusPill(overdue.length, 'Overdue',   overdue.length>0?'bg-red-500 text-white':'bg-red-100 text-red-600')}
+        </div>
+        <div class="w-px h-5 bg-slate-200 hidden sm:block"></div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Alerts</span>
+          ${statusPill(critical, 'Critical', critical>0?'bg-red-500 text-white':'bg-red-100 text-red-600')}
+          ${statusPill(high,     'High',     high>0?'bg-orange-400 text-white':'bg-orange-100 text-orange-600')}
+        </div>
+      </div>
     </div>
 
-    <!-- Critical Alert -->
-    ${critical > 0 ? `
-    <div class="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 flex items-center gap-3">
-      <span class="text-2xl">🚨</span>
-      <div class="flex-1">
-        <div class="font-semibold text-red-800">${critical} critical ticket${critical>1?'s':''} need${critical===1?'s':''} immediate attention</div>
-        <a href="#" data-page="tickets" data-priority="critical" class="text-red-600 hover:underline text-sm">View critical tickets →</a>
-      </div>
-    </div>` : ''}
+    <!-- ═══ MINI STAT CARDS ═══ -->
+    <div class="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-4">
+      ${miniStat('Total',       mine.length, 'text-slate-800',  '')}
+      ${miniStat('Open',        cOpen,       'text-blue-600',   'open')}
+      ${miniStat('In Progress', cInProg,     'text-yellow-600', 'in_progress')}
+      ${miniStat('Pending',     cPend,       'text-orange-500', 'pending')}
+      ${miniStat('Resolved',    cRes,        'text-green-600',  'resolved')}
+      ${miniStat('Closed',      cClosed,     'text-slate-400',  'closed')}
+    </div>
 
-    <!-- Charts Row -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+    <!-- ═══ MAIN GRID ═══ -->
+    <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
 
-      <!-- Status Donut -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-        <h3 class="font-semibold text-slate-800 mb-4 text-sm">Ticket Status Overview</h3>
-        <canvas id="dash-status" height="190"></canvas>
-      </div>
+      <!-- LEFT: Charts + Category (3 cols) -->
+      <div class="xl:col-span-3 space-y-4">
 
-      <!-- 7-Day Trend -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-        <h3 class="font-semibold text-slate-800 mb-4 text-sm">Last 7 Days</h3>
-        <canvas id="dash-trend" height="190"></canvas>
-      </div>
+        <!-- Charts row -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+            <h3 class="font-semibold text-slate-800 text-sm mb-3">Status Overview</h3>
+            <canvas id="dash-status" height="175"></canvas>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+            <h3 class="font-semibold text-slate-800 text-sm mb-3">Tickets — Last 7 Days</h3>
+            <canvas id="dash-trend" height="175"></canvas>
+          </div>
+        </div>
 
-      <!-- Category Breakdown -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-        <h3 class="font-semibold text-slate-800 mb-4 text-sm">Open by Category</h3>
-        ${catBreakdown.length === 0
-          ? '<div class="text-center text-slate-400 text-sm py-10">No open tickets 🎉</div>'
-          : catBreakdown.map(c => `
-            <div class="flex items-center gap-2 mb-3">
-              <span>${c.icon}</span>
-              <div class="flex-1">
-                <div class="flex justify-between text-xs mb-1">
-                  <span class="text-slate-700 font-medium">${c.name}</span>
-                  <span class="font-semibold text-slate-600">${c.count}</span>
+        <!-- Category Breakdown -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-slate-800 text-sm">Open Tickets by Category</h3>
+            <span class="text-xs text-slate-400">${active.length} active</span>
+          </div>
+          ${catBreakdown.length === 0
+            ? '<div class="text-center text-slate-400 text-sm py-8">🎉 No open tickets right now!</div>'
+            : catBreakdown.map(c => `
+              <div class="flex items-center gap-3 mb-3 last:mb-0">
+                <span class="text-base w-6 text-center flex-shrink-0">${c.icon}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex justify-between text-xs mb-1">
+                    <span class="text-slate-700 font-medium">${c.name}</span>
+                    <span class="font-bold text-slate-600">${c.count}</span>
+                  </div>
+                  <div class="w-full bg-slate-100 rounded-full h-1.5">
+                    <div class="h-1.5 rounded-full transition-all duration-500"
+                      style="width:${Math.min(100,c.count/(catBreakdown[0].count||1)*100)}%;background:${c.color}"></div>
+                  </div>
                 </div>
-                <div class="w-full bg-slate-100 rounded-full h-1.5">
-                  <div class="h-1.5 rounded-full transition-all" style="width:${Math.min(100,c.count/(catBreakdown[0].count||1)*100)}%;background:${c.color}"></div>
-                </div>
-              </div>
-            </div>`).join('')}
-      </div>
-    </div>
+              </div>`).join('')}
+        </div>
 
-    <!-- Agent Workload + Recent Activity -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-      <!-- Agent Workload / My Summary -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <!-- Agent Workload (agent/admin only, shown in left column on mobile) -->
         ${isAgent() ? `
-          <h3 class="font-semibold text-slate-800 mb-4 text-sm">Agent Workload</h3>
-          ${agentLoad.length === 0
-            ? '<div class="text-slate-400 text-sm text-center py-4">No agents found</div>'
-            : agentLoad.map(a => `
-              <div class="flex items-center gap-2 mb-3 p-2 rounded-lg hover:bg-slate-50">
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 xl:hidden">
+          <h3 class="font-semibold text-slate-800 text-sm mb-3">Agent Workload</h3>
+          ${agentLoad.length===0
+            ? '<div class="text-slate-400 text-sm text-center py-3">No agents</div>'
+            : agentLoad.map(a=>`
+              <div class="flex items-center gap-2 py-2 border-b border-slate-50 last:border-0">
                 ${avtr(a.name,'w-7 h-7')}
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium text-slate-700 truncate">${a.name}</div>
-                  <div class="text-xs text-slate-400 capitalize">${a.role}</div>
+                  <div class="w-full bg-slate-100 rounded-full h-1 mt-1">
+                    <div class="h-1 rounded-full bg-indigo-400" style="width:${Math.min(100,(a.open/maxLoad)*100)}%"></div>
+                  </div>
                 </div>
-                <div class="text-right">
-                  <span class="font-bold text-lg ${a.open>5?'text-red-600':a.open>2?'text-orange-500':'text-slate-700'}">${a.open}</span>
-                  <div class="text-xs text-slate-400">open</div>
-                </div>
+                <span class="font-bold text-base flex-shrink-0 ${a.open>5?'text-red-500':a.open>2?'text-orange-500':'text-slate-600'}">${a.open}</span>
               </div>`).join('')}
-        ` : `
-          <h3 class="font-semibold text-slate-800 mb-4 text-sm">My Summary</h3>
-          <div class="space-y-2">
-            ${[['Open',counts.open,'text-blue-600'],['In Progress',counts.in_progress,'text-yellow-600'],['Pending',counts.pending,'text-orange-500'],['Resolved',counts.resolved,'text-green-600'],['Total',counts.total,'text-slate-700']].map(([l,v,c]) => `
-              <div class="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
-                <span class="text-sm text-slate-600">${l}</span>
-                <span class="font-bold text-lg ${c}">${v}</span>
-              </div>`).join('')}
-          </div>`}
+        </div>` : ''}
       </div>
 
-      <!-- Recent Activity -->
-      <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100">
-        <div class="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
-          <h3 class="font-semibold text-slate-900 text-sm">Recent Activity</h3>
-          <a href="#" data-page="tickets" class="text-xs text-indigo-600 hover:underline">View all →</a>
+      <!-- RIGHT: Urgent + Workload + Activity (2 cols) -->
+      <div class="xl:col-span-2 space-y-4">
+
+        <!-- Critical & Overdue Tickets -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="font-semibold text-slate-900 text-sm">Critical & Overdue</h3>
+            ${urgentList.length>0
+              ? `<span class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">${urgentList.length} urgent</span>`
+              : ''}
+          </div>
+          ${urgentList.length===0
+            ? '<div class="px-4 py-8 text-center text-slate-400 text-sm">✅ No urgent tickets</div>'
+            : `<div class="divide-y divide-slate-50 max-h-64 overflow-y-auto">
+                ${urgentList.map(t => {
+                  const assignee = allUsers.find(u=>u.id===t.assigneeId);
+                  const sla      = getSLAStatus(t);
+                  const slaColor = sla==='overdue' ? 'text-red-500 sla-overdue' : 'text-amber-500';
+                  return `
+                  <div class="px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
+                    <div class="flex items-start gap-2">
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm font-medium text-slate-800 truncate">${t.title}</div>
+                        <div class="text-xs font-mono text-slate-400 mt-0.5">${t.number}</div>
+                      </div>
+                      <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                        ${bdg(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}
+                        <span class="text-xs font-bold ${slaColor}">${slaAge(t)}</span>
+                      </div>
+                    </div>
+                    ${assignee
+                      ? `<div class="flex items-center gap-1 mt-1.5">${avtr(assignee.name,'w-4 h-4')}<span class="text-xs text-slate-500">${assignee.name}</span></div>`
+                      : '<div class="text-xs text-slate-400 mt-1.5 italic">Unassigned</div>'}
+                  </div>`;
+                }).join('')}
+              </div>`}
+          <div class="px-4 py-2 bg-slate-50 border-t border-slate-100">
+            <a href="#" data-page="tickets" class="text-xs text-indigo-500 hover:underline">View all tickets →</a>
+          </div>
         </div>
-        ${activity.length === 0
-          ? `<div class="p-10 text-center text-slate-400 text-sm">No activity yet. <a href="#" data-page="new-ticket" class="text-indigo-500 hover:underline">Submit a ticket →</a></div>`
-          : `<div class="divide-y divide-slate-50">
-              ${activity.map(t => {
-                const cat = cats.find(c => c.id === t.category);
-                return `
-                <div class="px-5 py-3 hover:bg-slate-50 cursor-pointer flex items-center gap-3 transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
-                  ${avtr(t.requesterName)}
-                  <div class="flex-1 min-w-0">
-                    <div class="text-sm font-medium text-slate-800 truncate">${t.title}</div>
-                    <div class="flex items-center gap-2 mt-0.5">
-                      <span class="font-mono text-xs text-slate-400">${t.number}</span>
-                      ${cat ? `<span class="text-xs text-slate-400">${cat.icon} ${cat.name}</span>` : ''}
-                      <span class="text-xs text-slate-400">${ago(t.updatedAt)}</span>
+
+        <!-- Agent Workload / My Summary (desktop right column) -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 hidden xl:block">
+          ${isAgent() ? `
+          <h3 class="font-semibold text-slate-900 text-sm mb-3">Agent Workload</h3>
+          ${agentLoad.length===0
+            ? '<div class="text-slate-400 text-sm text-center py-3">No agents</div>'
+            : agentLoad.map(a=>`
+              <div class="flex items-center gap-2 py-2 border-b border-slate-50 last:border-0">
+                ${avtr(a.name,'w-7 h-7')}
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-medium text-slate-700 truncate">${a.name}</div>
+                  <div class="w-full bg-slate-100 rounded-full h-1 mt-1">
+                    <div class="h-1 rounded-full bg-indigo-400" style="width:${Math.min(100,(a.open/maxLoad)*100)}%"></div>
+                  </div>
+                </div>
+                <span class="font-bold text-lg flex-shrink-0 ${a.open>5?'text-red-500':a.open>2?'text-orange-500':'text-slate-600'}">${a.open}</span>
+              </div>`).join('')}
+          ` : `
+          <h3 class="font-semibold text-slate-900 text-sm mb-3">My Summary</h3>
+          ${[['Open',cOpen,'text-blue-600'],['In Progress',cInProg,'text-yellow-600'],['Pending',cPend,'text-orange-500'],['Resolved',cRes,'text-green-600'],['Total',mine.length,'text-slate-800']].map(([l,v,c])=>`
+            <div class="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
+              <span class="text-sm text-slate-600">${l}</span>
+              <span class="font-bold text-xl ${c}">${v}</span>
+            </div>`).join('')}`}
+        </div>
+
+        <!-- Recent Activity Feed -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="font-semibold text-slate-900 text-sm">Recent Activity</h3>
+            ${isAdmin() ? `<a href="#" data-page="logs" class="text-xs text-indigo-500 hover:underline">Full logs →</a>` : ''}
+          </div>
+          ${recentLogs.length===0
+            ? `<div class="px-4 py-8 text-center text-slate-400 text-sm">No activity yet.<br><a href="#" data-page="new-ticket" class="text-indigo-400 hover:underline">Create your first ticket →</a></div>`
+            : `<div class="divide-y divide-slate-50 max-h-72 overflow-y-auto">
+                ${recentLogs.map(l=>`
+                <div class="px-4 py-2.5 hover:bg-slate-50 transition-colors ${l.ticketId?'cursor-pointer':''}"
+                  ${l.ticketId?`onclick="render('ticket',{ticketId:'${l.ticketId}'})"`:''}>
+                  <div class="flex items-start gap-2">
+                    ${avtr(l.by,'w-5 h-5')}
+                    <div class="flex-1 min-w-0">
+                      <div class="text-xs font-medium text-slate-700 truncate">${l.action}</div>
+                      <div class="flex items-center gap-1.5 mt-0.5 text-xs text-slate-400">
+                        <span>${l.by}</span>
+                        <span>·</span>
+                        <span>${ago(l.at)}</span>
+                        ${l.ticketNumber?`<span>·</span><span class="font-mono text-indigo-400">${l.ticketNumber}</span>`:''}
+                      </div>
                     </div>
                   </div>
-                  <div class="flex gap-1.5 flex-shrink-0">
-                    ${bdg(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}
-                    ${bdg(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}
-                  </div>
-                </div>`;
-              }).join('')}
-            </div>`}
+                </div>`).join('')}
+              </div>`}
+        </div>
       </div>
     </div>
   </div>
 
   <script>
     (function(){
-      const all  = ${JSON.stringify(getTickets())};
-      const mine = ${isAgent() ? 'all' : `all.filter(t=>t.requesterId==='${currentUser.id}')`};
-      const byStatus=[${Object.keys(STATUS_LABELS).map(s=>`mine.filter(t=>t.status==='${s}').length`).join(',')}];
-      const dayData=${JSON.stringify(dayData)};
-      const dayLabels=${JSON.stringify(dayLabels)};
-
-      const opts={responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}}}};
-      const ctxS=document.getElementById('dash-status');
-      const ctxT=document.getElementById('dash-trend');
-      if(ctxS) new Chart(ctxS,{type:'doughnut',data:{labels:${JSON.stringify(Object.values(STATUS_LABELS))},datasets:[{data:byStatus,backgroundColor:['#3b82f6','#eab308','#f97316','#22c55e','#94a3b8'],borderWidth:0}]},options:opts});
-      if(ctxT) new Chart(ctxT,{type:'line',data:{labels:dayLabels,datasets:[{label:'Tickets',data:dayData,borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,0.08)',fill:true,tension:0.4,pointRadius:3}]},options:{...opts,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+      const byStatus = ${JSON.stringify(byStatus)};
+      const dayData  = ${JSON.stringify(dayData)};
+      const dayLabels= ${JSON.stringify(dayLabels)};
+      const opts = {responsive:true, maintainAspectRatio:true, plugins:{legend:{position:'bottom',labels:{boxWidth:8,font:{size:10},padding:6}}}};
+      const ctxS = document.getElementById('dash-status');
+      const ctxT = document.getElementById('dash-trend');
+      if(ctxS) new Chart(ctxS, {type:'doughnut', data:{labels:${JSON.stringify(Object.values(STATUS_LABELS))}, datasets:[{data:byStatus, backgroundColor:['#3b82f6','#eab308','#f97316','#22c55e','#94a3b8'], borderWidth:0, hoverOffset:6}]}, options:{...opts, cutout:'68%'}});
+      if(ctxT) new Chart(ctxT, {type:'bar', data:{labels:dayLabels, datasets:[{label:'Tickets', data:dayData, backgroundColor:'rgba(99,102,241,0.75)', borderRadius:4, borderSkipped:false}]}, options:{...opts, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true, ticks:{stepSize:1}, grid:{color:'rgba(0,0,0,0.04)'}}, x:{grid:{display:false}}}}});
     })();
   <\/script>`;
 }
@@ -1339,6 +1479,43 @@ function bindNav() {
     const btn = document.getElementById('btn-dm');
     if (btn) btn.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
   });
+  document.getElementById('btn-notif')?.addEventListener('click', e => {
+    e.stopPropagation();
+    let panel = document.getElementById('notif-panel');
+    if (panel) { panel.remove(); return; }
+    // Build notification panel
+    const logs = Store.get('activityLogs',[]).slice(-20).reverse();
+    panel = document.createElement('div');
+    panel.id = 'notif-panel';
+    panel.className = 'fixed z-50 w-72 bg-white rounded-xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col';
+    // Position: above/beside the sidebar footer
+    const btn = document.getElementById('btn-notif');
+    const rect = btn.getBoundingClientRect();
+    panel.style.cssText = `bottom:${window.innerHeight-rect.top+8}px; left:${Math.min(rect.left, window.innerWidth-288)}px; max-height:360px;`;
+    panel.innerHTML = `
+      <div class="px-4 py-3 bg-slate-900 flex items-center justify-between flex-shrink-0">
+        <span class="text-white font-semibold text-sm">Notifications</span>
+        <button onclick="document.getElementById('notif-panel')?.remove()" class="text-slate-400 hover:text-white text-lg leading-none">✕</button>
+      </div>
+      <div class="overflow-y-auto flex-1 divide-y divide-slate-50">
+        ${logs.length===0
+          ? '<div class="p-6 text-center text-slate-400 text-sm">No recent activity</div>'
+          : logs.map(l=>`
+            <div class="px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors" ${l.ticketId?`onclick="document.getElementById('notif-panel')?.remove();render('ticket',{ticketId:'${l.ticketId}'})"`:''}>
+              <div class="text-xs font-medium text-slate-800">${l.action}</div>
+              <div class="text-xs text-slate-400 mt-0.5">${l.by} · ${ago(l.at)}${l.ticketNumber?' · '+l.ticketNumber:''}</div>
+            </div>`).join('')}
+      </div>
+      ${isAdmin()?`<div class="px-4 py-2 border-t border-slate-100 bg-slate-50 flex-shrink-0">
+        <a href="#" onclick="document.getElementById('notif-panel')?.remove();render('logs');return false;" class="text-xs text-indigo-500 hover:underline">View full activity log →</a>
+      </div>`:''}
+    `;
+    document.body.appendChild(panel);
+    // Close on outside click
+    setTimeout(() => document.addEventListener('click', function close(ev) {
+      if (!panel.contains(ev.target)) { panel.remove(); document.removeEventListener('click', close); }
+    }), 0);
+  });
 }
 
 function bindPageEvents(page, params) {
@@ -1476,84 +1653,108 @@ function bindPageEvents(page, params) {
 }
 
 // ================================================================
-// MOUSE EFFECTS — Rainbow gradient + splash
+// MOUSE EFFECTS — Rainbow gradient trail + splash (all pages)
 // ================================================================
 (function() {
   const canvas  = document.getElementById('mouse-canvas');
   const ctx     = canvas.getContext('2d');
+  const ring    = document.getElementById('cursor-ring');
   let trails    = [];
   let inactiveTimer = null;
   let fading    = false;
   let globalAlpha = 1;
+  let ringX = window.innerWidth/2, ringY = window.innerHeight/2;
+  let mouseX = ringX, mouseY = ringY;
+  let ringHue = 0;
 
   function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
   resize();
   window.addEventListener('resize', resize);
 
-  function hslStr(h) { return `hsl(${h},100%,60%)`; }
-
   let hue = 0;
   window.addEventListener('mousemove', e => {
+    mouseX = e.clientX; mouseY = e.clientY;
     hue = (hue + 3) % 360;
-    trails.push({ x: e.clientX, y: e.clientY, h: hue, r: 28, alpha: 0.55, born: Date.now() });
+    const isLogin = currentPage === 'login';
+    trails.push({
+      x: e.clientX, y: e.clientY, h: hue,
+      r:     isLogin ? 28 : 16,
+      alpha: isLogin ? 0.55 : 0.22,
+      born: Date.now()
+    });
     if (trails.length > 60) trails.shift();
 
-    // Reset fade timer
     fading = false;
     globalAlpha = 1;
     canvas.style.opacity = 1;
     clearTimeout(inactiveTimer);
-    inactiveTimer = setTimeout(() => { fading = true; }, 2000);
+    inactiveTimer = setTimeout(() => { fading = true; }, 1800);
   });
 
-  // Splash on click — login page only
+  // Click splash — works on all pages, subtle on non-login
   window.addEventListener('click', e => {
-    if (currentPage !== 'login') return;
-    const colors = ['#f472b6','#818cf8','#34d399','#fbbf24','#60a5fa','#f87171'];
-    for (let i = 0; i < 5; i++) {
-      const ring    = document.createElement('div');
-      const size    = 40 + i * 35;
-      const color   = colors[i % colors.length];
-      ring.className = 'splash-ring';
-      ring.style.cssText = `
+    const isLogin = currentPage === 'login';
+    const colors  = ['#f472b6','#818cf8','#34d399','#fbbf24','#60a5fa','#f87171'];
+    const count   = isLogin ? 5 : 3;
+    for (let i = 0; i < count; i++) {
+      const r    = document.createElement('div');
+      const size = (isLogin ? 40 : 22) + i * (isLogin ? 35 : 20);
+      r.className = 'splash-ring';
+      r.style.cssText = `
         left:${e.clientX}px; top:${e.clientY}px;
         width:${size}px; height:${size}px;
-        border-color:${color};
-        animation-duration:${0.5 + i * 0.12}s;
-        animation-delay:${i * 0.04}s;
+        border-color:${colors[i%colors.length]};
+        animation-duration:${0.5+i*0.12}s;
+        animation-delay:${i*0.04}s;
+        opacity:${isLogin?'1':'0.55'};
       `;
-      document.body.appendChild(ring);
-      setTimeout(() => ring.remove(), 900);
+      document.body.appendChild(r);
+      setTimeout(() => r.remove(), 900);
     }
   });
 
+  // Animated cursor ring (smooth lag follow)
+  function animRing() {
+    ringX += (mouseX - ringX) * 0.14;
+    ringY += (mouseY - ringY) * 0.14;
+    ringHue = (ringHue + 1.2) % 360;
+    if (ring) {
+      ring.style.left = ringX + 'px';
+      ring.style.top  = ringY + 'px';
+      ring.style.borderColor = `hsl(${ringHue},80%,60%)`;
+      ring.style.opacity = currentPage === 'login' ? '0.85' : '0.45';
+    }
+    requestAnimationFrame(animRing);
+  }
+  animRing();
+
+  window.addEventListener('mousedown', () => { if(ring){ring.style.width='16px';ring.style.height='16px';} });
+  window.addEventListener('mouseup',   () => { if(ring){ring.style.width='26px';ring.style.height='26px';} });
+
   function draw() {
-    // Only active on login page
-    if (currentPage !== 'login') {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      canvas.style.opacity = 0;
-      trails = [];
-      requestAnimationFrame(draw);
-      return;
-    }
-    canvas.style.display = 'block';
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const isLogin = currentPage === 'login';
+    const maxOpacity = isLogin ? 1 : 0.38;
+
     if (fading) {
-      globalAlpha = Math.max(0, globalAlpha - 0.018);
-      canvas.style.opacity = globalAlpha;
+      globalAlpha = Math.max(0, globalAlpha - 0.016);
+      canvas.style.opacity = Math.min(globalAlpha, maxOpacity);
+    } else {
+      canvas.style.opacity = Math.min(1, maxOpacity);
     }
+
     const now = Date.now();
     trails = trails.filter(t => now - t.born < 900);
-    trails.forEach((t) => {
+    trails.forEach(t => {
       const age  = (now - t.born) / 900;
       const r    = t.r * (1 - age * 0.5);
       const a    = t.alpha * (1 - age);
       const grad = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, r);
-      grad.addColorStop(0, `hsla(${t.h},100%,65%,${a})`);
-      grad.addColorStop(0.5, `hsla(${(t.h+40)%360},100%,60%,${a * 0.5})`);
-      grad.addColorStop(1, `hsla(${(t.h+80)%360},100%,55%,0)`);
+      grad.addColorStop(0,   `hsla(${t.h},100%,65%,${a})`);
+      grad.addColorStop(0.5, `hsla(${(t.h+40)%360},100%,60%,${a*0.5})`);
+      grad.addColorStop(1,   `hsla(${(t.h+80)%360},100%,55%,0)`);
       ctx.beginPath();
-      ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+      ctx.arc(t.x, t.y, r, 0, Math.PI*2);
       ctx.fillStyle = grad;
       ctx.fill();
     });
