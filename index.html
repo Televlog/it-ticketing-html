@@ -106,10 +106,11 @@ const Store = {
 };
 
 function initStorage() {
-  if (Store.get('users',null)      === null) Store.set('users', DEFAULT_USERS);
-  if (Store.get('categories',null) === null) Store.set('categories', DEFAULT_CATEGORIES);
-  if (Store.get('tickets',null)    === null) Store.set('tickets', []);
-  if (Store.get('ticketSeq',null)  === null) Store.set('ticketSeq', 0);
+  if (Store.get('users',null)        === null) Store.set('users', DEFAULT_USERS);
+  if (Store.get('categories',null)   === null) Store.set('categories', DEFAULT_CATEGORIES);
+  if (Store.get('tickets',null)      === null) Store.set('tickets', []);
+  if (Store.get('ticketSeq',null)    === null) Store.set('ticketSeq', 0);
+  if (Store.get('activityLogs',null) === null) Store.set('activityLogs', []);
   // Migrate old users that don't have deleted field
   const users = Store.get('users',[]).map(u => ({ deleted:false, ...u }));
   Store.set('users', users);
@@ -178,6 +179,27 @@ const getUsers      = () => Store.get('users',[]).filter(u => !u.deleted);      
 const getAllUsers    = () => Store.get('users',[]);                                // incl. deleted (for history)
 const getCategories = () => Store.get('categories', []);
 
+// ================================================================
+// ACTIVITY LOGGING
+// ================================================================
+function logActivity(type, action, ticket, details) {
+  const logs = Store.get('activityLogs', []);
+  logs.push({
+    id:           Date.now().toString() + Math.random().toString(36).slice(2,5),
+    type,
+    action,
+    ticketId:     ticket?.id     || null,
+    ticketNumber: ticket?.number || null,
+    ticketTitle:  ticket?.title  || null,
+    by:           currentUser?.name || 'System',
+    byRole:       currentUser?.role || '',
+    at:           new Date().toISOString(),
+    details:      details || '',
+  });
+  if (logs.length > 2000) logs.splice(0, logs.length - 2000);
+  Store.set('activityLogs', logs);
+}
+
 function createTicket(data) {
   const seq = Store.get('ticketSeq',0) + 1;
   Store.set('ticketSeq', seq);
@@ -201,6 +223,7 @@ function createTicket(data) {
     updatedAt:      new Date().toISOString(),
   };
   const all = getTickets(); all.push(t); Store.set('tickets', all);
+  logActivity('ticket_created', 'Ticket created', t, `Priority: ${t.priority} | Category: ${(getCategories().find(c=>c.id===t.category)||{}).name||''}`);
   return t;
 }
 
@@ -221,6 +244,7 @@ async function updateTicket(id, updates) {
   if (changes.length) {
     all[i].history = all[i].history || [];
     all[i].history.push({ action: changes.join(' | '), by: currentUser.name, at: new Date().toISOString() });
+    logActivity('ticket_updated', changes.join(' | '), all[i]);
   }
 
   if (updates.status === 'resolved' && !old.resolvedAt) updates.resolvedAt = new Date().toISOString();
@@ -255,6 +279,7 @@ function addComment(ticketId, body, isInternal) {
   t.history.push({ action: isInternal ? 'Internal note added' : 'Comment added', by: currentUser.name, at: new Date().toISOString() });
   t.updatedAt = new Date().toISOString();
   Store.set('tickets', all);
+  logActivity(isInternal ? 'internal_note' : 'comment_added', isInternal ? 'Internal note added' : 'Comment added', t);
 }
 
 // ================================================================
@@ -298,6 +323,7 @@ function render(page, params={}) {
   // Access control
   if (page === 'reports' && !isAdmin()) { showToast('Access denied — Admins only','error'); return; }
   if (page === 'users'   && !isAdmin()) { showToast('Access denied — Admins only','error'); return; }
+  if (page === 'logs'    && !isAdmin()) { showToast('Access denied — Admins only','error'); return; }
 
   currentPage = page;
   if (params.ticketId) currentTicketId = params.ticketId;
@@ -315,6 +341,7 @@ function getPageContent(page, params) {
     case 'ticket':     return renderTicketDetail(params.ticketId);
     case 'reports':    return renderReports(params);
     case 'users':      return renderUsers();
+    case 'logs':       return renderLogs();
     default:           return renderDashboard();
   }
 }
@@ -330,12 +357,29 @@ function renderShell(content) {
     ...(isAdmin() ? [
       { page:'reports', label:'Reports', icon:'📈' },
       { page:'users',   label:'Users',   icon:'👥' },
+      { page:'logs',    label:'Logs',    icon:'📋' },
     ] : []),
   ];
 
   return `
   <div class="flex h-screen overflow-hidden">
-    <aside class="w-56 bg-slate-900 flex flex-col flex-shrink-0">
+
+    <!-- Mobile top bar -->
+    <div class="md:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 flex items-center px-4 border-b border-slate-700" style="height:52px">
+      <button id="btn-menu" class="text-slate-300 hover:text-white text-2xl leading-none mr-3">☰</button>
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xs">IT</div>
+        <span class="text-white font-semibold text-sm">IT Ticketing</span>
+      </div>
+    </div>
+
+    <!-- Sidebar overlay (mobile) -->
+    <div id="sidebar-overlay" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden" onclick="closeSidebar()"></div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar"
+      class="fixed md:relative inset-y-0 left-0 w-64 md:w-56 bg-slate-900 flex flex-col flex-shrink-0 z-40
+        -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out">
       <div class="p-4 border-b border-slate-700">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">IT</div>
@@ -345,7 +389,7 @@ function renderShell(content) {
           </div>
         </div>
       </div>
-      <nav class="flex-1 p-3 space-y-1">
+      <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
         ${links.map(l => `
           <a href="#" data-page="${l.page}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
             ${currentPage === l.page ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700 hover:text-white'}">
@@ -364,8 +408,14 @@ function renderShell(content) {
         </div>
       </div>
     </aside>
-    <main class="flex-1 overflow-auto bg-slate-50">${content}</main>
+
+    <main class="flex-1 overflow-auto bg-slate-50 pt-[52px] md:pt-0">${content}</main>
   </div>`;
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar')?.classList.add('-translate-x-full');
+  document.getElementById('sidebar-overlay')?.classList.add('hidden');
 }
 
 // ================================================================
@@ -386,7 +436,6 @@ function renderLogin() {
     </button>
 
     <div class="relative w-full max-w-md">
-      <!-- Card -->
       <div class="rounded-2xl shadow-2xl p-7 ${dark ? 'bg-slate-800 border border-slate-700' : 'bg-white'}">
         <div class="text-center mb-6">
           <div class="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg text-2xl">🎫</div>
@@ -394,123 +443,41 @@ function renderLogin() {
           <p class="text-sm mt-1 ${dark ? 'text-slate-400' : 'text-slate-500'}">Sign in with your company email</p>
         </div>
 
-        <!-- Tab switcher -->
-        <div class="flex rounded-xl p-1 mb-5 ${dark ? 'bg-slate-700' : 'bg-slate-100'}">
-          <button id="tab-signin" onclick="switchTab('signin')"
-            class="flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all tab-signin-active
-              ${dark ? 'bg-slate-600 text-white shadow' : 'bg-white text-slate-900 shadow'}">
+        <form id="login-form" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Email Address</label>
+            <input id="login-email" type="email" required autofocus placeholder="you@company.com"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Password</label>
+            <input id="login-password" type="password" required placeholder="••••••••"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
+                ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+          </div>
+          <div id="login-error" class="hidden text-red-500 text-xs bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-center"></div>
+          <button type="submit"
+            class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
             Sign In
           </button>
-          <button id="tab-register" onclick="switchTab('register')"
-            class="flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all
-              ${dark ? 'text-slate-400' : 'text-slate-500'}">
-            Create Account
-          </button>
-        </div>
+        </form>
 
-        <!-- Sign In Form -->
-        <div id="panel-signin">
-          <form id="login-form" class="space-y-4">
-            <div>
-              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Email Address</label>
-              <input id="login-email" type="email" required autofocus placeholder="you@company.com"
-                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Password</label>
-              <input id="login-password" type="password" required placeholder="••••••••"
-                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
-            </div>
-            <div id="login-error" class="hidden text-red-500 text-xs bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-center"></div>
-            <button type="submit"
-              class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
-              Sign In
-            </button>
-          </form>
-        </div>
-
-        <!-- Register Form -->
-        <div id="panel-register" class="hidden">
-          <form id="register-form" class="space-y-3">
-            <div>
-              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Full Name</label>
-              <input id="reg-name" type="text" required placeholder="Your full name"
-                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Email Address</label>
-              <input id="reg-email" type="email" required placeholder="you@company.com"
-                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Department</label>
-              <input id="reg-dept" type="text" placeholder="e.g. Finance, HR, Operations"
-                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Password</label>
-              <input id="reg-pass" type="password" required placeholder="Min 6 characters"
-                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Confirm Password</label>
-              <input id="reg-pass2" type="password" required placeholder="Repeat password"
-                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                  ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
-            </div>
-            <div id="reg-error" class="hidden text-red-500 text-xs bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-center"></div>
-            <div id="reg-ok"    class="hidden text-green-600 text-xs bg-green-50 px-3 py-2 rounded-lg border border-green-100 text-center"></div>
-            <button type="submit"
-              class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
-              Create Account
-            </button>
-          </form>
-          <p class="text-xs text-center mt-3 ${dark ? 'text-slate-500' : 'text-slate-400'}">
-            New accounts are pending until approved by an admin.
-          </p>
-        </div>
-
-        <p class="text-center text-xs mt-5 ${dark ? 'text-slate-600' : 'text-slate-400'}">IT Ticketing System · Company Internal</p>
+        <p class="text-center text-xs mt-5 ${dark ? 'text-slate-600' : 'text-slate-400'}">IT Ticketing System · Company Internal<br>
+          <span class="${dark ? 'text-slate-700' : 'text-slate-300'}">Access is restricted to authorized users only.</span>
+        </p>
       </div>
     </div>
   </div>`;
 }
 
-function switchTab(tab) {
-  const dark = document.documentElement.classList.contains('dark');
-  const si = document.getElementById('panel-signin');
-  const rg = document.getElementById('panel-register');
-  const ts = document.getElementById('tab-signin');
-  const tr = document.getElementById('tab-register');
-  const activeClass = dark ? 'bg-slate-600 text-white shadow' : 'bg-white text-slate-900 shadow';
-  const inactiveClass = dark ? 'text-slate-400' : 'text-slate-500';
-
-  if (tab === 'signin') {
-    si.classList.remove('hidden'); rg.classList.add('hidden');
-    ts.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeClass}`;
-    tr.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${inactiveClass}`;
-  } else {
-    rg.classList.remove('hidden'); si.classList.add('hidden');
-    tr.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeClass}`;
-    ts.className = `flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${inactiveClass}`;
-  }
-}
-
 function bindLogin() {
-  // Dark mode toggle
   document.getElementById('dm-toggle')?.addEventListener('click', () => {
     document.documentElement.classList.toggle('dark');
     Store.set('darkMode', document.documentElement.classList.contains('dark'));
     render('login');
   });
 
-  // Sign in
   document.getElementById('login-form').addEventListener('submit', e => {
     e.preventDefault();
     const ok = login(
@@ -524,33 +491,6 @@ function bindLogin() {
       err.textContent = 'Invalid email or password. Please try again.';
       err.classList.remove('hidden');
     }
-  });
-
-  // Register
-  document.getElementById('register-form')?.addEventListener('submit', e => {
-    e.preventDefault();
-    const name  = document.getElementById('reg-name').value.trim();
-    const email = document.getElementById('reg-email').value.trim().toLowerCase();
-    const dept  = document.getElementById('reg-dept').value.trim();
-    const pass  = document.getElementById('reg-pass').value;
-    const pass2 = document.getElementById('reg-pass2').value;
-    const errEl = document.getElementById('reg-error');
-    const okEl  = document.getElementById('reg-ok');
-    errEl.classList.add('hidden'); okEl.classList.add('hidden');
-
-    if (!name || !email || !pass) { errEl.textContent='All fields are required.'; errEl.classList.remove('hidden'); return; }
-    if (pass.length < 6)          { errEl.textContent='Password must be at least 6 characters.'; errEl.classList.remove('hidden'); return; }
-    if (pass !== pass2)           { errEl.textContent='Passwords do not match.'; errEl.classList.remove('hidden'); return; }
-
-    const users = Store.get('users',[]);
-    if (users.find(u => u.email === email)) { errEl.textContent='That email is already registered.'; errEl.classList.remove('hidden'); return; }
-
-    users.push({ id: Date.now().toString(), name, email, password: pass, dept, role:'user', active: false, deleted: false, pendingApproval: true });
-    Store.set('users', users);
-
-    okEl.textContent = '✅ Account created! An admin must activate it before you can sign in.';
-    okEl.classList.remove('hidden');
-    document.getElementById('register-form').reset();
   });
 }
 
@@ -595,17 +535,17 @@ function renderDashboard() {
   const activity = [...mine].sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt)).slice(0,6);
 
   return `
-  <div class="p-6">
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <h1 class="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p class="text-slate-500 text-sm mt-0.5">Welcome back, <strong>${currentUser.name}</strong> &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</p>
+  <div class="p-4 md:p-6">
+    <div class="flex items-center justify-between mb-6 gap-3">
+      <div class="min-w-0">
+        <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
+        <p class="text-slate-500 text-xs md:text-sm mt-0.5 truncate">Welcome back, <strong>${currentUser.name}</strong> &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</p>
       </div>
-      <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">+ New Ticket</a>
+      <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-3 md:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors flex-shrink-0">+ New Ticket</a>
     </div>
 
     <!-- Stat Cards -->
-    <div class="grid grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+    <div class="grid grid-cols-3 lg:grid-cols-6 gap-2 md:gap-3 mb-5">
       ${[
         { label:'Total',       val:counts.total,       bg:'bg-white',          num:'text-slate-900',   border:'border-slate-100', status:''           },
         { label:'Open',        val:counts.open,        bg:'bg-blue-50',        num:'text-blue-700',    border:'border-blue-100',  status:'open'        },
@@ -764,53 +704,57 @@ function renderTicketList(params={}) {
   list = [...list].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   return `
-  <div class="p-6">
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold text-slate-900">${isAgent() ? 'All Tickets' : 'My Tickets'}</h1>
-      <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors">+ New Ticket</a>
+  <div class="p-4 md:p-6">
+    <div class="flex items-center justify-between mb-4 gap-3">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900">${isAgent() ? 'All Tickets' : 'My Tickets'}</h1>
+      <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-3 md:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors flex-shrink-0">+ New Ticket</a>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-4 flex flex-wrap gap-3">
-      <input id="f-search" type="text" placeholder="Search by title or number…" value="${fq}"
-        class="border border-slate-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-36 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-      <select id="f-status" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <option value="">All Statuses</option>
-        ${Object.entries(STATUS_LABELS).map(([v,l]) => `<option value="${v}" ${fs===v?'selected':''}>${l}</option>`).join('')}
-      </select>
-      <select id="f-priority" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <option value="">All Priorities</option>
-        ${['low','medium','high','critical'].map(p=>`<option value="${p}" ${fp===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
-      </select>
-      <button id="btn-filter" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">Filter</button>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-3 md:p-4 mb-4 flex flex-col sm:flex-row flex-wrap gap-2 md:gap-3">
+      <input id="f-search" type="text" placeholder="Search tickets…" value="${fq}"
+        class="border border-slate-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+      <div class="flex gap-2 flex-wrap">
+        <select id="f-status" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 flex-1 min-w-0">
+          <option value="">All Statuses</option>
+          ${Object.entries(STATUS_LABELS).map(([v,l]) => `<option value="${v}" ${fs===v?'selected':''}>${l}</option>`).join('')}
+        </select>
+        <select id="f-priority" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 flex-1 min-w-0">
+          <option value="">All Priorities</option>
+          ${['low','medium','high','critical'].map(p=>`<option value="${p}" ${fp===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+        </select>
+        <button id="btn-filter" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">Filter</button>
+      </div>
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
       ${list.length === 0
         ? `<div class="p-12 text-center text-slate-400 text-sm">No tickets found.</div>`
-        : `<table class="w-full text-sm">
-            <thead class="bg-slate-50 border-b border-slate-100">
-              <tr>
-                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ticket</th>
-                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
-                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Priority</th>
-                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">Category</th>
-                ${isAgent() ? '<th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Requester</th>' : ''}
-                <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Created</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-50">
-              ${list.map(t => {
-                const cat = cats.find(c => c.id === t.category);
-                return `
-                <tr class="hover:bg-slate-50 cursor-pointer transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
-                  <td class="px-4 py-3"><div class="font-medium text-slate-800">${t.title}</div><div class="text-xs text-slate-400 font-mono">${t.number}</div></td>
-                  <td class="px-4 py-3">${bdg(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}</td>
-                  <td class="px-4 py-3">${bdg(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}</td>
-                  <td class="px-4 py-3 text-slate-600 hidden md:table-cell">${cat ? cat.icon+' '+cat.name : '—'}</td>
-                  ${isAgent() ? `<td class="px-4 py-3 text-slate-600 hidden lg:table-cell">${t.requesterName}</td>` : ''}
-                  <td class="px-4 py-3 text-slate-400 text-xs hidden lg:table-cell">${ago(t.createdAt)}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>`}
+        : `<div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 border-b border-slate-100">
+                <tr>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ticket</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden sm:table-cell">Priority</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">Category</th>
+                  ${isAgent() ? '<th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Requester</th>' : ''}
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Created</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50">
+                ${list.map(t => {
+                  const cat = cats.find(c => c.id === t.category);
+                  return `
+                  <tr class="hover:bg-slate-50 cursor-pointer transition-colors" onclick="render('ticket',{ticketId:'${t.id}'})">
+                    <td class="px-4 py-3"><div class="font-medium text-slate-800 text-sm">${t.title}</div><div class="text-xs text-slate-400 font-mono">${t.number}</div></td>
+                    <td class="px-4 py-3">${bdg(STATUS_LABELS[t.status]||t.status, STATUS_COLORS[t.status]||'')}</td>
+                    <td class="px-4 py-3 hidden sm:table-cell">${bdg(t.priority.charAt(0).toUpperCase()+t.priority.slice(1), PRIORITY_COLORS[t.priority]||'')}</td>
+                    <td class="px-4 py-3 text-slate-600 hidden md:table-cell">${cat ? cat.icon+' '+cat.name : '—'}</td>
+                    ${isAgent() ? `<td class="px-4 py-3 text-slate-600 hidden lg:table-cell">${t.requesterName}</td>` : ''}
+                    <td class="px-4 py-3 text-slate-400 text-xs hidden lg:table-cell">${ago(t.createdAt)}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>`}
     </div>
   </div>`;
 }
@@ -822,10 +766,10 @@ function renderNewTicket() {
   const cats   = getCategories();
   const agents = getUsers().filter(u => u.role === 'agent' || u.role === 'admin');
   return `
-  <div class="p-6 max-w-2xl">
+  <div class="p-4 md:p-6 max-w-2xl">
     <button onclick="render('tickets')" class="text-slate-500 hover:text-slate-700 text-sm mb-4">← Back</button>
-    <h1 class="text-2xl font-bold text-slate-900 mb-6">New Ticket</h1>
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-4">
+    <h1 class="text-xl md:text-2xl font-bold text-slate-900 mb-6">New Ticket</h1>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 md:p-6 mb-4">
       <form id="new-ticket-form" class="space-y-5">
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Title <span class="text-red-500">*</span></label>
@@ -837,7 +781,7 @@ function renderNewTicket() {
           <textarea id="nt-desc" required rows="5" placeholder="Describe the problem in detail…"
             class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Category</label>
             <select id="nt-cat" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -898,9 +842,9 @@ function renderTicketDetail(ticketId) {
   const agents   = getUsers().filter(u => u.role === 'agent' || u.role === 'admin');
 
   return `
-  <div class="p-6">
+  <div class="p-4 md:p-6">
     <button onclick="render('tickets')" class="text-slate-500 hover:text-slate-700 text-sm mb-4">← Back to Tickets</button>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 max-w-5xl">
 
       <div class="lg:col-span-2 space-y-4">
         <!-- Ticket Body -->
@@ -1042,13 +986,13 @@ function renderReports(params={}) {
   const byPrio    = ['low','medium','high','critical'].map(p=>monthly.filter(t=>t.priority===p).length);
 
   return `
-  <div class="p-6">
-    <div class="flex items-center justify-between mb-6">
+  <div class="p-4 md:p-6">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-slate-900">Monthly Reports</h1>
+        <h1 class="text-xl md:text-2xl font-bold text-slate-900">Monthly Reports</h1>
         <p class="text-slate-500 text-sm">${allTickets.length} total tickets in system</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <select id="rep-month" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
           ${MONTHS.map((m,i) => `<option value="${i+1}" ${selMonth===i+1?'selected':''}>${m}</option>`).join('')}
         </select>
@@ -1056,7 +1000,7 @@ function renderReports(params={}) {
           ${years.map(y => `<option value="${y}" ${selYear===y?'selected':''}>${y}</option>`).join('')}
         </select>
         <button id="btn-rep-filter" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">View</button>
-        <button id="btn-export-csv" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-700">⬇ Export CSV</button>
+        <button id="btn-export-csv" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-700">⬇ Export</button>
       </div>
     </div>
 
@@ -1154,14 +1098,14 @@ function renderUsers() {
   const users = Store.get('users',[]);
 
   return `
-  <div class="p-6">
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold text-slate-900">User Management</h1>
-      <button id="btn-show-add" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">+ Add User</button>
+  <div class="p-4 md:p-6">
+    <div class="flex items-center justify-between mb-6 gap-3">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900">User Management</h1>
+      <button id="btn-show-add" class="bg-indigo-600 text-white px-3 md:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 flex-shrink-0">+ Add User</button>
     </div>
 
     <!-- Add User Form -->
-    <div id="add-user-form" class="hidden bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
+    <div id="add-user-form" class="hidden bg-white rounded-xl shadow-sm border border-slate-100 p-4 md:p-6 mb-6">
       <h2 class="font-semibold text-slate-900 mb-4">Add New User</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div><label class="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
@@ -1187,6 +1131,7 @@ function renderUsers() {
 
     <!-- Users Table -->
     <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-slate-50 border-b border-slate-100">
           <tr>
@@ -1245,6 +1190,7 @@ function renderUsers() {
           </tr>`).join('')}
         </tbody>
       </table>
+      </div>
     </div>
     <p class="text-xs text-slate-400 mt-3 px-1">
       * Deleted users cannot log in but their ticket history is fully preserved in the system.
@@ -1279,16 +1225,114 @@ function confirmDeleteUser(userId, name) {
 }
 
 // ================================================================
+// LOGS (Admin only)
+// ================================================================
+function renderLogs() {
+  if (!isAdmin()) return '<div class="p-6 text-center text-slate-400">Access denied.</div>';
+  const logs = Store.get('activityLogs', []).slice().reverse();
+
+  const TYPE_LABELS = {
+    ticket_created: '🎫 Created',
+    ticket_updated: '✏️ Updated',
+    comment_added:  '💬 Comment',
+    internal_note:  '🔒 Note',
+  };
+  const TYPE_COLORS = {
+    ticket_created: 'bg-blue-100 text-blue-700',
+    ticket_updated: 'bg-yellow-100 text-yellow-700',
+    comment_added:  'bg-indigo-100 text-indigo-700',
+    internal_note:  'bg-amber-100 text-amber-700',
+  };
+
+  return `
+  <div class="p-4 md:p-6">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900">Activity Logs</h1>
+        <p class="text-slate-500 text-sm">${logs.length} entries — full audit trail of all ticket activity</p>
+      </div>
+      <div class="flex gap-2">
+        <button id="btn-clear-logs"
+          class="border border-red-200 text-red-500 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-50">
+          Clear Logs
+        </button>
+        <button id="btn-export-logs"
+          class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-700">
+          ⬇ Export CSV
+        </button>
+      </div>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      ${[
+        ['Tickets Created', logs.filter(l=>l.type==='ticket_created').length, 'text-blue-700',   'bg-blue-50',   'border-blue-100'],
+        ['Tickets Updated', logs.filter(l=>l.type==='ticket_updated').length, 'text-yellow-700', 'bg-yellow-50', 'border-yellow-100'],
+        ['Comments Added',  logs.filter(l=>l.type==='comment_added').length,  'text-indigo-700', 'bg-indigo-50', 'border-indigo-100'],
+        ['Internal Notes',  logs.filter(l=>l.type==='internal_note').length,  'text-amber-700',  'bg-amber-50',  'border-amber-100'],
+      ].map(([label, count, tc, bg, bc]) => `
+        <div class="${bg} border ${bc} rounded-xl p-4 shadow-sm">
+          <div class="text-xs font-medium text-slate-500 mb-1">${label}</div>
+          <div class="text-2xl font-bold ${tc}">${count}</div>
+        </div>`).join('')}
+    </div>
+
+    <!-- Log table -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      ${logs.length === 0
+        ? '<div class="p-12 text-center text-slate-400 text-sm">No activity logged yet. Start creating and updating tickets.</div>'
+        : `<div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 border-b border-slate-100">
+                <tr>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">Time</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Type</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Action</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden sm:table-cell">Ticket</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">By</th>
+                  <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Role</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50">
+                ${logs.map(l => `
+                <tr class="hover:bg-slate-50 transition-colors ${l.ticketId ? 'cursor-pointer' : ''}"
+                  ${l.ticketId ? `onclick="render('ticket',{ticketId:'${l.ticketId}'})"` : ''}>
+                  <td class="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">${fmt(l.at)}</td>
+                  <td class="px-4 py-3">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${TYPE_COLORS[l.type]||'bg-slate-100 text-slate-600'}">
+                      ${TYPE_LABELS[l.type]||l.type}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-slate-700 max-w-xs"><div class="truncate">${l.action}</div>
+                    ${l.details ? `<div class="text-xs text-slate-400 truncate mt-0.5">${l.details}</div>` : ''}
+                  </td>
+                  <td class="px-4 py-3 font-mono text-xs text-indigo-600 hidden sm:table-cell">${l.ticketNumber||'—'}</td>
+                  <td class="px-4 py-3 text-slate-600 hidden md:table-cell">${l.by}</td>
+                  <td class="px-4 py-3 text-slate-500 capitalize text-xs hidden lg:table-cell">${l.byRole}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`}
+    </div>
+  </div>`;
+}
+
+// ================================================================
 // EVENT BINDING
 // ================================================================
 function bindNav() {
   document.querySelectorAll('[data-page]').forEach(el => {
     el.addEventListener('click', e => {
       e.preventDefault();
+      closeSidebar();
       render(el.dataset.page, el.dataset.priority ? { priority: el.dataset.priority } : {});
     });
   });
   document.getElementById('btn-logout')?.addEventListener('click', logout);
+  document.getElementById('btn-menu')?.addEventListener('click', () => {
+    document.getElementById('sidebar')?.classList.toggle('-translate-x-full');
+    document.getElementById('sidebar-overlay')?.classList.toggle('hidden');
+  });
   document.getElementById('btn-dm')?.addEventListener('click', () => {
     document.documentElement.classList.toggle('dark');
     Store.set('darkMode', document.documentElement.classList.contains('dark'));
@@ -1388,6 +1432,22 @@ function bindPageEvents(page, params) {
       const headers = ['Ticket No','Title','Status','Priority','Category','Requester','Requester Email','Assigned To','Created At','Updated At','Resolved At','Closed At','Resolution Time','Comment Count','Last Action'];
       exportCSV([headers,...rows], `tickets-${MONTHS[m-1]}-${y}.csv`);
       showToast('CSV exported');
+    });
+  }
+
+  if (page === 'logs') {
+    document.getElementById('btn-export-logs')?.addEventListener('click', () => {
+      const logs = Store.get('activityLogs', []).slice().reverse();
+      const rows = logs.map(l => [l.at, l.type, l.action, l.ticketNumber||'', l.ticketTitle||'', l.by, l.byRole, l.details||'']);
+      const headers = ['Timestamp','Type','Action','Ticket No','Ticket Title','By','Role','Details'];
+      exportCSV([headers,...rows], `activity-log-${new Date().toISOString().slice(0,10)}.csv`);
+      showToast('Activity log exported');
+    });
+    document.getElementById('btn-clear-logs')?.addEventListener('click', () => {
+      if (!confirm('Clear all activity logs? This cannot be undone.')) return;
+      Store.set('activityLogs', []);
+      render('logs');
+      showToast('Logs cleared', 'warning');
     });
   }
 
