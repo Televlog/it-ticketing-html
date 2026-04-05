@@ -8,67 +8,74 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
-  /* Dark mode */
-  html.dark body { background:#0f172a; color:#e2e8f0; }
-  html.dark .dm-bg   { background:#1e293b !important; }
-  html.dark .dm-bg2  { background:#0f172a !important; }
-  html.dark .dm-card { background:#1e293b !important; border-color:#334155 !important; }
-  html.dark .dm-text { color:#e2e8f0 !important; }
-  html.dark .dm-sub  { color:#94a3b8 !important; }
-  html.dark .dm-inp  { background:#0f172a !important; border-color:#475569 !important; color:#e2e8f0 !important; }
-  html.dark .dm-inp::placeholder { color:#64748b; }
-  html.dark .dm-divide > * { border-color:#334155 !important; }
-  html.dark .dm-hover:hover { background:#334155 !important; }
-  html.dark .dm-sidebar { background:#0f172a !important; }
-  html.dark .dm-sidebar-border { border-color:#1e293b !important; }
-  html.dark .dm-main { background:#0f172a !important; }
-  html.dark .dm-thead { background:#1e293b !important; }
-  html.dark .dm-tr:hover { background:#1e293b !important; }
-  html.dark .dm-border { border-color:#334155 !important; }
-  html.dark .dm-amber { background:#451a03 !important; }
+  /* ── Base ─────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: #f1f4f9;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
 
-  /* Mouse gradient canvas */
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:99px; }
+  ::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
+
+  /* ── Dark mode ────────────────────────────────────────────── */
+  html.dark body { background:#0d1117; color:#e2e8f0; }
+  html.dark .dm-bg   { background:#161b22 !important; }
+  html.dark .dm-bg2  { background:#0d1117 !important; }
+  html.dark .dm-card { background:#161b22 !important; border-color:#30363d !important; }
+  html.dark .dm-text { color:#e6edf3 !important; }
+  html.dark .dm-sub  { color:#8b949e !important; }
+  html.dark .dm-inp  { background:#0d1117 !important; border-color:#30363d !important; color:#e6edf3 !important; }
+  html.dark .dm-inp::placeholder { color:#484f58; }
+  html.dark .dm-divide > * { border-color:#30363d !important; }
+  html.dark .dm-hover:hover { background:#21262d !important; }
+  html.dark .dm-sidebar { background:#0d1117 !important; }
+  html.dark .dm-main { background:#0d1117 !important; }
+  html.dark .dm-thead { background:#161b22 !important; }
+  html.dark .dm-tr:hover { background:#161b22 !important; }
+  html.dark .dm-border { border-color:#30363d !important; }
+  html.dark .dm-amber { background:#3d1a00 !important; }
+
+  /* ── Login page only: rainbow canvas ─────────────────────── */
   #mouse-canvas {
     position:fixed; inset:0; pointer-events:none; z-index:999;
-    transition:opacity 0.6s ease;
+    transition:opacity 0.5s ease;
   }
 
-  /* Splash rings */
-  .splash-ring {
+  /* Login sparkle dots */
+  .sparkle-dot {
     position:fixed; border-radius:50%; pointer-events:none; z-index:1000;
-    border:2px solid transparent;
-    animation:splashAnim 0.7s ease-out forwards;
-  }
-  @keyframes splashAnim {
-    0%   { transform:translate(-50%,-50%) scale(0); opacity:0.9; }
-    100% { transform:translate(-50%,-50%) scale(1); opacity:0; }
   }
 
-  /* Custom cursor ring */
-  #cursor-ring {
-    position:fixed; pointer-events:none; z-index:1002; border-radius:50%;
-    width:26px; height:26px; border:1.5px solid rgba(99,102,241,0.7);
-    transform:translate(-50%,-50%);
-    transition:width 0.12s ease, height 0.12s ease;
-  }
-
-  /* Notification panel */
-  #notif-panel { animation:notifSlide 0.15s ease-out; }
+  /* ── Notification panel ───────────────────────────────────── */
+  #notif-panel { animation: notifSlide 0.15s ease-out; }
   @keyframes notifSlide {
     from { opacity:0; transform:translateY(6px); }
     to   { opacity:1; transform:translateY(0); }
   }
 
-  /* SLA badge pulse for overdue */
-  .sla-overdue { animation: pulse-red 1.8s infinite; }
-  @keyframes pulse-red {
-    0%,100% { opacity:1; } 50% { opacity:0.6; }
+  /* ── SLA overdue pulse ────────────────────────────────────── */
+  .sla-overdue { animation: pulseRed 2s ease-in-out infinite; }
+  @keyframes pulseRed { 0%,100%{opacity:1} 50%{opacity:0.55} }
+
+  /* ── App cards — softer feel ──────────────────────────────── */
+  .app-card {
+    background:#ffffff;
+    border:1px solid #e8edf4;
+    border-radius:14px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+    transition: box-shadow 0.2s ease;
   }
+  .app-card:hover { box-shadow: 0 4px 12px rgba(15,23,42,0.08), 0 2px 4px rgba(15,23,42,0.05); }
 </style>
 </head>
-<body class="bg-gray-50 font-sans dm-main">
+<body class="font-sans dm-main" style="background:#f1f4f9">
 <canvas id="mouse-canvas"></canvas>
-<div id="cursor-ring"></div>
 <div id="root"></div>
 <script>
 
@@ -348,7 +355,7 @@ function statusPill(count, label, cls) {
 }
 
 function miniStat(label, val, color, status) {
-  return `<div class="bg-white border border-slate-100 rounded-xl p-3 text-center shadow-sm hover:shadow-md transition-all cursor-pointer"
+  return `<div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06) p-3 text-center shadow-sm hover:shadow-md transition-all cursor-pointer"
     ${status ? `onclick="render('tickets',{status:'${status}'})"` : ''}>
     <div class="text-2xl font-bold ${color}">${val}</div>
     <div class="text-xs text-slate-500 mt-0.5 leading-tight">${label}</div>
@@ -424,11 +431,11 @@ function renderShell(content) {
   <div class="flex h-screen overflow-hidden">
 
     <!-- Mobile top bar -->
-    <div class="md:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 flex items-center px-4 border-b border-slate-700" style="height:52px">
-      <button id="btn-menu" class="text-slate-300 hover:text-white text-2xl leading-none mr-3">☰</button>
+    <div class="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center px-4" style="height:52px;background:linear-gradient(90deg,#1c2340,#111827);border-bottom:1px solid rgba(255,255,255,0.07)">
+      <button id="btn-menu" class="text-white/60 hover:text-white text-2xl leading-none mr-3">☰</button>
       <div class="flex items-center gap-2">
-        <div class="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xs">IT</div>
-        <span class="text-white font-semibold text-sm">IT Ticketing</span>
+        <div class="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-xs" style="background:linear-gradient(135deg,#6366f1,#4f46e5)">IT</div>
+        <span class="text-white font-semibold text-sm tracking-tight">IT Ticketing</span>
       </div>
     </div>
 
@@ -437,45 +444,50 @@ function renderShell(content) {
 
     <!-- Sidebar -->
     <aside id="sidebar"
-      class="fixed md:relative inset-y-0 left-0 w-64 md:w-56 bg-slate-900 flex flex-col flex-shrink-0 z-40
-        -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out">
-      <div class="p-4 border-b border-slate-700">
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">IT</div>
+      class="fixed md:relative inset-y-0 left-0 w-64 md:w-56 flex flex-col flex-shrink-0 z-40
+        -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out"
+      style="background:linear-gradient(180deg,#1c2340 0%,#111827 100%)">
+      <div class="p-4" style="border-bottom:1px solid rgba(255,255,255,0.07)">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg"
+            style="background:linear-gradient(135deg,#6366f1,#4f46e5)">IT</div>
           <div>
-            <div class="text-white font-semibold text-sm leading-tight">IT Ticketing</div>
-            <div class="text-slate-400 text-xs">System</div>
+            <div class="text-white font-semibold text-sm leading-tight tracking-tight">IT Ticketing</div>
+            <div class="text-xs" style="color:rgba(255,255,255,0.38)">System</div>
           </div>
         </div>
       </div>
-      <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
+      <nav class="flex-1 p-2.5 space-y-0.5 overflow-y-auto">
         ${links.map(l => `
-          <a href="#" data-page="${l.page}" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-            ${currentPage === l.page ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700 hover:text-white'}">
-            <span>${l.icon}</span><span>${l.label}</span>
+          <a href="#" data-page="${l.page}" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
+            ${currentPage === l.page
+              ? 'text-white shadow-sm" style="background:rgba(99,102,241,0.85)"'
+              : 'hover:text-white" style="color:rgba(255,255,255,0.55)" onmouseover="this.style.background=\'rgba(255,255,255,0.07)\'" onmouseout="this.style.background=\'\''}">
+            <span class="text-base">${l.icon}</span><span>${l.label}</span>
           </a>`).join('')}
       </nav>
-      <div class="p-3 border-t border-slate-700">
-        <div class="flex items-center gap-2 px-2 py-2">
-          ${avtr(currentUser.name)}
+      <div class="p-2.5" style="border-top:1px solid rgba(255,255,255,0.07)">
+        <div class="flex items-center gap-2 px-2 py-2 rounded-xl" style="background:rgba(255,255,255,0.04)">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs flex-shrink-0 text-white"
+            style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">${(currentUser.name||'?').charAt(0).toUpperCase()}</div>
           <div class="flex-1 min-w-0">
             <div class="text-white text-xs font-medium truncate">${currentUser.name}</div>
-            <div class="text-slate-400 text-xs capitalize">${currentUser.role}</div>
+            <div class="text-xs capitalize" style="color:rgba(255,255,255,0.4)">${currentUser.role}</div>
           </div>
           ${(()=>{
             const n24 = Store.get('activityLogs',[]).filter(l=>(Date.now()-new Date(l.at))<86400000).length;
-            return `<button id="btn-notif" title="Notifications" class="text-slate-400 hover:text-white text-sm mr-1 relative">
+            return `<button id="btn-notif" title="Notifications" class="text-sm mr-1 relative transition-opacity hover:opacity-100" style="color:rgba(255,255,255,0.5)">
               🔔
-              ${n24>0?`<span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full text-white flex items-center justify-center font-bold" style="font-size:8px">${n24>9?'9+':n24}</span>`:''}
+              ${n24>0?`<span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-rose-500 rounded-full text-white flex items-center justify-center font-bold" style="font-size:8px">${n24>9?'9+':n24}</span>`:''}
             </button>`;
           })()}
-          <button id="btn-dm" title="Toggle dark mode" class="text-slate-400 hover:text-yellow-300 text-sm mr-1">🌙</button>
-          <button id="btn-logout" title="Sign Out" class="text-slate-400 hover:text-white text-base">⏏</button>
+          <button id="btn-dm" title="Toggle dark mode" class="text-sm mr-1 transition-opacity hover:opacity-100" style="color:rgba(255,255,255,0.5)">🌙</button>
+          <button id="btn-logout" title="Sign Out" class="text-base transition-opacity hover:opacity-100" style="color:rgba(255,255,255,0.5)">⏏</button>
         </div>
       </div>
     </aside>
 
-    <main class="flex-1 overflow-auto bg-slate-50 pt-[52px] md:pt-0">${content}</main>
+    <main class="flex-1 overflow-auto pt-[52px] md:pt-0" style="background:#f1f4f9">${content}</main>
   </div>`;
 }
 
@@ -489,48 +501,59 @@ function closeSidebar() {
 // ================================================================
 function renderLogin() {
   const dark = document.documentElement.classList.contains('dark');
+  const bg   = dark ? '#0d1117' : 'linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%)';
+  const card = dark ? '#161b22' : '#ffffff';
+  const cardBorder = dark ? '1px solid #30363d' : '1px solid rgba(255,255,255,0.1)';
   return `
-  <div id="login-bg" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden
-    ${dark ? 'bg-slate-900' : 'bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900'}">
-    <div class="absolute inset-0 opacity-10" style="background-image:radial-gradient(circle,#6366f1 1px,transparent 1px);background-size:32px 32px"></div>
+  <div id="login-bg" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+    style="background:${bg}">
+    <!-- Subtle dot grid -->
+    <div class="absolute inset-0" style="background-image:radial-gradient(circle,rgba(99,102,241,0.15) 1px,transparent 1px);background-size:28px 28px;opacity:0.7"></div>
+    <!-- Glow orbs -->
+    <div class="absolute" style="width:400px;height:400px;background:radial-gradient(circle,rgba(99,102,241,0.18) 0%,transparent 70%);top:-80px;right:-60px;pointer-events:none"></div>
+    <div class="absolute" style="width:300px;height:300px;background:radial-gradient(circle,rgba(139,92,246,0.12) 0%,transparent 70%);bottom:-60px;left:-40px;pointer-events:none"></div>
 
     <!-- Dark mode toggle -->
     <button id="dm-toggle" title="Toggle dark mode"
-      class="fixed top-4 right-4 z-50 w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-lg border transition-all
-        ${dark ? 'bg-slate-700 border-slate-600 text-yellow-300 hover:bg-slate-600' : 'bg-white/20 border-white/30 text-white hover:bg-white/30'}">
+      class="fixed top-4 right-4 z-50 w-9 h-9 rounded-full flex items-center justify-center text-base shadow-xl transition-all"
+      style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:white">
       ${dark ? '☀️' : '🌙'}
     </button>
 
-    <div class="relative w-full max-w-md">
-      <div class="rounded-2xl shadow-2xl p-7 ${dark ? 'bg-slate-800 border border-slate-700' : 'bg-white'}">
-        <div class="text-center mb-6">
-          <div class="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg text-2xl">🎫</div>
-          <h1 class="text-2xl font-bold ${dark ? 'text-white' : 'text-slate-900'}">IT Ticketing System</h1>
-          <p class="text-sm mt-1 ${dark ? 'text-slate-400' : 'text-slate-500'}">Sign in with your company email</p>
+    <div class="relative w-full max-w-sm">
+      <!-- Card -->
+      <div class="rounded-2xl p-8" style="background:${card};border:${cardBorder};box-shadow:0 25px 50px rgba(0,0,0,0.4),0 0 0 1px rgba(255,255,255,0.05)">
+        <div class="text-center mb-7">
+          <!-- Logo -->
+          <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl shadow-xl"
+            style="background:linear-gradient(135deg,#6366f1,#4f46e5)">🎫</div>
+          <h1 class="text-2xl font-bold tracking-tight" style="color:${dark?'#e6edf3':'#0f172a'}">IT Ticketing System</h1>
+          <p class="text-sm mt-1.5" style="color:${dark?'#8b949e':'#64748b'}">Sign in with your company account</p>
         </div>
 
         <form id="login-form" class="space-y-4">
           <div>
-            <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Email Address</label>
+            <label class="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style="color:${dark?'#8b949e':'#64748b'}">Email Address</label>
             <input id="login-email" type="email" required autofocus placeholder="you@company.com"
-              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+              style="background:${dark?'#0d1117':'#f8fafc'};border:1px solid ${dark?'#30363d':'#e2e8f0'};color:${dark?'#e6edf3':'#0f172a'}"
+              class="w-full rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"/>
           </div>
           <div>
-            <label class="block text-xs font-medium mb-1 ${dark ? 'text-slate-300' : 'text-slate-600'}">Password</label>
+            <label class="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style="color:${dark?'#8b949e':'#64748b'}">Password</label>
             <input id="login-password" type="password" required placeholder="••••••••"
-              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500
-                ${dark ? 'bg-slate-900 border-slate-600 text-white placeholder-slate-500' : 'border-slate-300 text-slate-900'}"/>
+              style="background:${dark?'#0d1117':'#f8fafc'};border:1px solid ${dark?'#30363d':'#e2e8f0'};color:${dark?'#e6edf3':'#0f172a'}"
+              class="w-full rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"/>
           </div>
-          <div id="login-error" class="hidden text-red-500 text-xs bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-center"></div>
+          <div id="login-error" class="hidden text-red-400 text-xs px-3 py-2 rounded-xl text-center" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2)"></div>
           <button type="submit"
-            class="w-full bg-indigo-600 text-white rounded-lg py-2.5 font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all">
-            Sign In
+            class="w-full text-white rounded-xl py-2.5 font-semibold text-sm active:scale-95 transition-all mt-2"
+            style="background:linear-gradient(135deg,#6366f1,#4f46e5);box-shadow:0 4px 14px rgba(99,102,241,0.4)">
+            Sign In →
           </button>
         </form>
 
-        <p class="text-center text-xs mt-5 ${dark ? 'text-slate-600' : 'text-slate-400'}">IT Ticketing System · Company Internal<br>
-          <span class="${dark ? 'text-slate-700' : 'text-slate-300'}">Access is restricted to authorized users only.</span>
+        <p class="text-center text-xs mt-6" style="color:${dark?'rgba(255,255,255,0.2)':'rgba(0,0,0,0.25)'}">
+          IT Ticketing System &middot; Company Internal<br>Access is restricted to authorized users only.
         </p>
       </div>
     </div>
@@ -616,7 +639,7 @@ function renderDashboard() {
     <!-- Header row -->
     <div class="flex items-center justify-between gap-3 mb-4">
       <div>
-        <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
+        <h1 class="text-xl md:text-2xl font-bold" style="color:#0f172a;letter-spacing:-0.02em">Dashboard</h1>
         <p class="text-slate-500 text-xs mt-0.5">${new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
       </div>
       <a href="#" data-page="new-ticket"
@@ -626,7 +649,7 @@ function renderDashboard() {
     </div>
 
     <!-- ═══ ATERA-STYLE STATUS BAR ═══ -->
-    <div class="bg-white border border-slate-100 rounded-xl px-4 py-3 mb-4 shadow-sm overflow-x-auto">
+    <div class="rounded-xl px-4 py-3 mb-4 overflow-x-auto" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06)">
       <div class="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-max sm:min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Ticket status</span>
@@ -663,18 +686,18 @@ function renderDashboard() {
 
         <!-- Charts row -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+          <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-4">
             <h3 class="font-semibold text-slate-800 text-sm mb-3">Status Overview</h3>
             <canvas id="dash-status" height="175"></canvas>
           </div>
-          <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+          <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-4">
             <h3 class="font-semibold text-slate-800 text-sm mb-3">Tickets — Last 7 Days</h3>
             <canvas id="dash-trend" height="175"></canvas>
           </div>
         </div>
 
         <!-- Category Breakdown -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-4">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-semibold text-slate-800 text-sm">Open Tickets by Category</h3>
             <span class="text-xs text-slate-400">${active.length} active</span>
@@ -699,7 +722,7 @@ function renderDashboard() {
 
         <!-- Agent Workload (agent/admin only, shown in left column on mobile) -->
         ${isAgent() ? `
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 xl:hidden">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-4 xl:hidden">
           <h3 class="font-semibold text-slate-800 text-sm mb-3">Agent Workload</h3>
           ${agentLoad.length===0
             ? '<div class="text-slate-400 text-sm text-center py-3">No agents</div>'
@@ -721,7 +744,7 @@ function renderDashboard() {
       <div class="xl:col-span-2 space-y-4">
 
         <!-- Critical & Overdue Tickets -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <h3 class="font-semibold text-slate-900 text-sm">Critical & Overdue</h3>
             ${urgentList.length>0
@@ -753,13 +776,13 @@ function renderDashboard() {
                   </div>`;
                 }).join('')}
               </div>`}
-          <div class="px-4 py-2 bg-slate-50 border-t border-slate-100">
+          <div class="px-4 py-2 border-t" style="background:#f8fafc;border-color:#e8edf4">
             <a href="#" data-page="tickets" class="text-xs text-indigo-500 hover:underline">View all tickets →</a>
           </div>
         </div>
 
         <!-- Agent Workload / My Summary (desktop right column) -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 hidden xl:block">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-4 hidden xl:block">
           ${isAgent() ? `
           <h3 class="font-semibold text-slate-900 text-sm mb-3">Agent Workload</h3>
           ${agentLoad.length===0
@@ -785,7 +808,7 @@ function renderDashboard() {
         </div>
 
         <!-- Recent Activity Feed -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <h3 class="font-semibold text-slate-900 text-sm">Recent Activity</h3>
             ${isAdmin() ? `<a href="#" data-page="logs" class="text-xs text-indigo-500 hover:underline">Full logs →</a>` : ''}
@@ -849,7 +872,7 @@ function renderTicketList(params={}) {
       <h1 class="text-xl md:text-2xl font-bold text-slate-900">${isAgent() ? 'All Tickets' : 'My Tickets'}</h1>
       <a href="#" data-page="new-ticket" class="bg-indigo-600 text-white px-3 md:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors flex-shrink-0">+ New Ticket</a>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-3 md:p-4 mb-4 flex flex-col sm:flex-row flex-wrap gap-2 md:gap-3">
+    <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-3 md:p-4 mb-4 flex flex-col sm:flex-row flex-wrap gap-2 md:gap-3">
       <input id="f-search" type="text" placeholder="Search tickets…" value="${fq}"
         class="border border-slate-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       <div class="flex gap-2 flex-wrap">
@@ -864,12 +887,12 @@ function renderTicketList(params={}) {
         <button id="btn-filter" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700">Filter</button>
       </div>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+    <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) overflow-hidden">
       ${list.length === 0
         ? `<div class="p-12 text-center text-slate-400 text-sm">No tickets found.</div>`
         : `<div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead class="bg-slate-50 border-b border-slate-100">
+              <thead class="border-b" style="background:#f8fafc;border-color:#e8edf4">
                 <tr>
                   <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ticket</th>
                   <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
@@ -909,7 +932,7 @@ function renderNewTicket() {
   <div class="p-4 md:p-6 max-w-2xl">
     <button onclick="render('tickets')" class="text-slate-500 hover:text-slate-700 text-sm mb-4">← Back</button>
     <h1 class="text-xl md:text-2xl font-bold text-slate-900 mb-6">New Ticket</h1>
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 md:p-6 mb-4">
+    <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-4 md:p-6 mb-4">
       <form id="new-ticket-form" class="space-y-5">
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Title <span class="text-red-500">*</span></label>
@@ -988,7 +1011,7 @@ function renderTicketDetail(ticketId) {
 
       <div class="lg:col-span-2 space-y-4">
         <!-- Ticket Body -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-6">
           <div class="flex items-start justify-between gap-4 mb-4">
             <div>
               <div class="font-mono text-xs text-slate-400 mb-1">${ticket.number}</div>
@@ -1004,7 +1027,7 @@ function renderTicketDetail(ticketId) {
         </div>
 
         <!-- Comments -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04)">
           <div class="px-5 py-4 border-b border-slate-100">
             <h2 class="font-semibold text-slate-900">Comments <span class="text-slate-400 font-normal text-sm">(${(ticket.comments||[]).length})</span></h2>
           </div>
@@ -1036,7 +1059,7 @@ function renderTicketDetail(ticketId) {
         </div>
 
         <!-- History -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04)">
           <div class="px-5 py-4 border-b border-slate-100">
             <h2 class="font-semibold text-slate-900">Activity History</h2>
           </div>
@@ -1052,7 +1075,7 @@ function renderTicketDetail(ticketId) {
 
       <!-- Right Panel -->
       <div class="space-y-4">
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-5">
           <h3 class="font-semibold text-slate-900 mb-4">Details</h3>
           <div class="space-y-3 text-sm">
             <div class="flex justify-between"><span class="text-slate-500">Requester</span><span class="font-medium text-slate-800">${ticket.requesterName}</span></div>
@@ -1067,7 +1090,7 @@ function renderTicketDetail(ticketId) {
         </div>
 
         ${isAgent() ? `
-        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-5">
           <h3 class="font-semibold text-slate-900 mb-4">Update Ticket</h3>
           <div class="space-y-3">
             <div>
@@ -1148,7 +1171,7 @@ function renderReports(params={}) {
     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
       ${Object.entries(STATUS_LABELS).map(([v,l]) => {
         const cnt = monthly.filter(t=>t.status===v).length;
-        return `<div class="bg-white border border-slate-100 rounded-xl p-4 text-center shadow-sm">
+        return `<div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06) p-4 text-center shadow-sm">
           <div class="text-2xl font-bold text-slate-900">${cnt}</div>
           <div class="text-xs text-slate-500 mt-1">${l}</div>
         </div>`;
@@ -1157,18 +1180,18 @@ function renderReports(params={}) {
 
     <!-- Charts -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+      <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-5">
         <h3 class="font-semibold text-slate-800 mb-3 text-sm">Status — ${MONTHS[selMonth-1]} ${selYear}</h3>
         <canvas id="rep-status" height="200"></canvas>
       </div>
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+      <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-5">
         <h3 class="font-semibold text-slate-800 mb-3 text-sm">Priority — ${MONTHS[selMonth-1]} ${selYear}</h3>
         <canvas id="rep-priority" height="200"></canvas>
       </div>
     </div>
 
     <!-- Full Ticket Table -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+    <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) overflow-hidden">
       <div class="px-5 py-4 border-b border-slate-100">
         <h3 class="font-semibold text-slate-900">${MONTHS[selMonth-1]} ${selYear} — ${monthly.length} ticket${monthly.length!==1?'s':''}</h3>
       </div>
@@ -1176,7 +1199,7 @@ function renderReports(params={}) {
         ? '<div class="p-10 text-center text-slate-400 text-sm">No tickets for this period.</div>'
         : `<div class="overflow-x-auto">
             <table class="w-full text-xs">
-              <thead class="bg-slate-50 border-b border-slate-100">
+              <thead class="border-b" style="background:#f8fafc;border-color:#e8edf4">
                 <tr>
                   <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Number</th>
                   <th class="text-left px-4 py-3 font-semibold text-slate-500 uppercase">Title</th>
@@ -1245,7 +1268,7 @@ function renderUsers() {
     </div>
 
     <!-- Add User Form -->
-    <div id="add-user-form" class="hidden bg-white rounded-xl shadow-sm border border-slate-100 p-4 md:p-6 mb-6">
+    <div id="add-user-form" class="hidden rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) p-4 md:p-6 mb-6">
       <h2 class="font-semibold text-slate-900 mb-4">Add New User</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div><label class="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
@@ -1270,10 +1293,10 @@ function renderUsers() {
     </div>
 
     <!-- Users Table -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+    <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) overflow-hidden">
       <div class="overflow-x-auto">
       <table class="w-full text-sm">
-        <thead class="bg-slate-50 border-b border-slate-100">
+        <thead class="border-b" style="background:#f8fafc;border-color:#e8edf4">
           <tr>
             <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">User</th>
             <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Dept</th>
@@ -1418,12 +1441,12 @@ function renderLogs() {
     </div>
 
     <!-- Log table -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+    <div class="rounded-xl" style="background:#fff;border:1px solid #e8edf4;box-shadow:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04) overflow-hidden">
       ${logs.length === 0
         ? '<div class="p-12 text-center text-slate-400 text-sm">No activity logged yet. Start creating and updating tickets.</div>'
         : `<div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead class="bg-slate-50 border-b border-slate-100">
+              <thead class="border-b" style="background:#f8fafc;border-color:#e8edf4">
                 <tr>
                   <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">Time</th>
                   <th class="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Type</th>
@@ -1653,19 +1676,15 @@ function bindPageEvents(page, params) {
 }
 
 // ================================================================
-// MOUSE EFFECTS — Rainbow gradient trail + splash (all pages)
+// MOUSE EFFECTS — Login page only (rainbow trail + sparkle click)
 // ================================================================
 (function() {
-  const canvas  = document.getElementById('mouse-canvas');
-  const ctx     = canvas.getContext('2d');
-  const ring    = document.getElementById('cursor-ring');
-  let trails    = [];
+  const canvas = document.getElementById('mouse-canvas');
+  const ctx    = canvas.getContext('2d');
+  let trails   = [];
   let inactiveTimer = null;
-  let fading    = false;
+  let fading   = false;
   let globalAlpha = 1;
-  let ringX = window.innerWidth/2, ringY = window.innerHeight/2;
-  let mouseX = ringX, mouseY = ringY;
-  let ringHue = 0;
 
   function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
   resize();
@@ -1673,17 +1692,10 @@ function bindPageEvents(page, params) {
 
   let hue = 0;
   window.addEventListener('mousemove', e => {
-    mouseX = e.clientX; mouseY = e.clientY;
+    if (currentPage !== 'login') return;
     hue = (hue + 3) % 360;
-    const isLogin = currentPage === 'login';
-    trails.push({
-      x: e.clientX, y: e.clientY, h: hue,
-      r:     isLogin ? 28 : 16,
-      alpha: isLogin ? 0.55 : 0.22,
-      born: Date.now()
-    });
+    trails.push({ x: e.clientX, y: e.clientY, h: hue, r: 26, alpha: 0.52, born: Date.now() });
     if (trails.length > 60) trails.shift();
-
     fading = false;
     globalAlpha = 1;
     canvas.style.opacity = 1;
@@ -1691,67 +1703,56 @@ function bindPageEvents(page, params) {
     inactiveTimer = setTimeout(() => { fading = true; }, 1800);
   });
 
-  // Click splash — works on all pages, subtle on non-login
+  // Subtle sparkle dots on click — login page only, no circles/rings
   window.addEventListener('click', e => {
-    const isLogin = currentPage === 'login';
-    const colors  = ['#f472b6','#818cf8','#34d399','#fbbf24','#60a5fa','#f87171'];
-    const count   = isLogin ? 5 : 3;
+    if (currentPage !== 'login') return;
+    const colors = ['#f472b6','#a78bfa','#34d399','#fbbf24','#60a5fa','#fb7185','#818cf8','#2dd4bf'];
+    const count = 10;
     for (let i = 0; i < count; i++) {
-      const r    = document.createElement('div');
-      const size = (isLogin ? 40 : 22) + i * (isLogin ? 35 : 20);
-      r.className = 'splash-ring';
-      r.style.cssText = `
+      const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+      const dist  = 18 + Math.random() * 28;
+      const size  = 2.5 + Math.random() * 3;
+      const dot   = document.createElement('div');
+      dot.className = 'sparkle-dot';
+      dot.style.cssText = `
         left:${e.clientX}px; top:${e.clientY}px;
         width:${size}px; height:${size}px;
-        border-color:${colors[i%colors.length]};
-        animation-duration:${0.5+i*0.12}s;
-        animation-delay:${i*0.04}s;
-        opacity:${isLogin?'1':'0.55'};
+        background:${colors[i % colors.length]};
+        transform:translate(-50%,-50%);
       `;
-      document.body.appendChild(r);
-      setTimeout(() => r.remove(), 900);
+      document.body.appendChild(dot);
+      dot.animate([
+        { transform: 'translate(-50%,-50%) scale(1.2)', opacity: 0.95, offset: 0 },
+        { transform: `translate(calc(-50% + ${(Math.cos(angle)*dist).toFixed(1)}px), calc(-50% + ${(Math.sin(angle)*dist).toFixed(1)}px)) scale(0)`, opacity: 0, offset: 1 }
+      ], { duration: 480 + Math.random() * 160, easing: 'cubic-bezier(0,0,0.3,1)', fill: 'forwards' })
+        .onfinish = () => dot.remove();
     }
   });
 
-  // Animated cursor ring (smooth lag follow)
-  function animRing() {
-    ringX += (mouseX - ringX) * 0.14;
-    ringY += (mouseY - ringY) * 0.14;
-    ringHue = (ringHue + 1.2) % 360;
-    if (ring) {
-      ring.style.left = ringX + 'px';
-      ring.style.top  = ringY + 'px';
-      ring.style.borderColor = `hsl(${ringHue},80%,60%)`;
-      ring.style.opacity = currentPage === 'login' ? '0.85' : '0.45';
-    }
-    requestAnimationFrame(animRing);
-  }
-  animRing();
-
-  window.addEventListener('mousedown', () => { if(ring){ring.style.width='16px';ring.style.height='16px';} });
-  window.addEventListener('mouseup',   () => { if(ring){ring.style.width='26px';ring.style.height='26px';} });
-
   function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const isLogin = currentPage === 'login';
-    const maxOpacity = isLogin ? 1 : 0.38;
-
-    if (fading) {
-      globalAlpha = Math.max(0, globalAlpha - 0.016);
-      canvas.style.opacity = Math.min(globalAlpha, maxOpacity);
-    } else {
-      canvas.style.opacity = Math.min(1, maxOpacity);
+    // Only run on login page — completely clear and stop on other pages
+    if (currentPage !== 'login') {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.style.opacity = '0';
+      trails = [];
+      requestAnimationFrame(draw);
+      return;
     }
 
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (fading) {
+      globalAlpha = Math.max(0, globalAlpha - 0.018);
+      canvas.style.opacity = globalAlpha;
+    }
     const now = Date.now();
-    trails = trails.filter(t => now - t.born < 900);
+    trails = trails.filter(t => now - t.born < 850);
     trails.forEach(t => {
-      const age  = (now - t.born) / 900;
-      const r    = t.r * (1 - age * 0.5);
+      const age  = (now - t.born) / 850;
+      const r    = t.r * (1 - age * 0.45);
       const a    = t.alpha * (1 - age);
       const grad = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, r);
       grad.addColorStop(0,   `hsla(${t.h},100%,65%,${a})`);
-      grad.addColorStop(0.5, `hsla(${(t.h+40)%360},100%,60%,${a*0.5})`);
+      grad.addColorStop(0.5, `hsla(${(t.h+40)%360},100%,60%,${a*0.45})`);
       grad.addColorStop(1,   `hsla(${(t.h+80)%360},100%,55%,0)`);
       ctx.beginPath();
       ctx.arc(t.x, t.y, r, 0, Math.PI*2);
